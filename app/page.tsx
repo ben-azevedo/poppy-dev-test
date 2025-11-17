@@ -26,6 +26,9 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [pendingTranscript, setPendingTranscript] = useState("");
 
+  // ElevenLabs Voice
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   // ✅ Claude is default brain
   const [provider, setProvider] = useState<Provider>("claude");
 
@@ -151,42 +154,57 @@ export default function Home() {
   }, []);
 
   // 🔊 Text-to-speech for Poppy's replies
-  const speak = (text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      console.warn("speechSynthesis not supported");
+  const speak = async (text: string) => {
+    // If we're muted, don't play anything
+    if (isMutedRef.current) {
+      setIsSpeaking(false);
       return;
     }
 
-    const synth = window.speechSynthesis;
-
-    // Stop any previous utterance cleanly
-    synth.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.05;
-    utterance.pitch = 1.1;
-
-    if (poppyVoice) {
-      utterance.voice = poppyVoice;
+    if (typeof window === "undefined") {
+      return;
     }
 
-    utterance.onstart = () => {
+    try {
       setIsSpeaking(true);
-    };
 
-    utterance.onend = () => {
+      // Call your ElevenLabs TTS route
+      const res = await fetch("/api/poppy-tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!res.ok) {
+        console.error("TTS request failed", await res.text());
+        setIsSpeaking(false);
+        return;
+      }
+
+      // Get binary audio back from the server
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      // Stop any previous audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+      };
+
+      // Play the new clip
+      await audio.play();
+    } catch (err) {
+      console.error("Error playing TTS audio", err);
       setIsSpeaking(false);
-      currentUtteranceRef.current = null;
-    };
-
-    currentUtteranceRef.current = utterance;
-
-    // Always queue the utterance…
-    synth.speak(utterance);
-
-    // …but if we're currently muted, immediately pause it.
-    if (isMutedRef.current) {
-      synth.pause();
     }
   };
 
@@ -497,6 +515,148 @@ export default function Home() {
     </div>
   );
 
+  // Handle exporting
+  const buildLocalSummary = (): string => {
+    const msgs = messagesRef.current;
+    if (!msgs.length) {
+      return [
+        "# Poppy Action Plan",
+        "",
+        "There isn't any conversation yet, so there's nothing to summarize.",
+        "",
+        "Start talking to Poppy, then export again to get a step-by-step plan.",
+      ].join("\n");
+    }
+
+    const userMsgs = msgs.filter((m) => m.role === "user");
+    const assistantMsgs = msgs.filter((m) => m.role === "assistant");
+
+    const firstUser = userMsgs[0]?.content.trim() ?? "";
+    const lastUser =
+      userMsgs.length > 0
+        ? userMsgs[userMsgs.length - 1].content.trim()
+        : firstUser;
+
+    const truncate = (text: string, max: number) =>
+      text.length > max ? text.slice(0, max) + "..." : text;
+
+    // Try to find the last assistant message that looks like it contains hooks/titles
+    const hookSource = [...assistantMsgs]
+      .reverse()
+      .find((m) => /hook\s*1/i.test(m.content) || /title\s*1/i.test(m.content));
+
+    // If we find hooks in the text, we’ll keep them exactly as Poppy wrote them
+    const hookSection = hookSource
+      ? [
+          "# Hook + title ideas from this session",
+          "",
+          hookSource.content.trim(),
+        ].join("\n")
+      : "";
+
+    const highLevelGoal =
+      lastUser ||
+      firstUser ||
+      "You had a conversation with Poppy about your content and next steps.";
+
+    // This is a generic but actually useful content playbook based on your convo:
+    const actionPlanLines = [
+      "# High-level goal",
+      truncate(highLevelGoal, 400),
+      "",
+      "# Action plan (step-by-step)",
+      "",
+      "1. **Clarify your primary focus.**",
+      "   In this session, your priority was to improve **YouTube hooks and titles** so your views better match your 1.59M subscribers.",
+      "",
+      "2. **Gather and organize your reference content.**",
+      "   - Your old viral videos (4M–6M+ views) – these show what your audience *already proved* they love.",
+      "   - Your brand voice document – this keeps everything in your “expert but not elitist” tone.",
+      "   - 1–2 favorite creators (like Marco) – good for studying pacing, energy, and hook style.",
+      "",
+      "3. **Analyze what made the bangers work.**",
+      "   - Note what types of stories hit (restorations, customs, grails, transformations).",
+      "   - Look at thumbnails: composition, text, colors, how “trashed vs restored” is shown.",
+      "   - Pay attention to the *first 5–10 seconds* of those videos: what’s the promise, the tension, the payoff?",
+      "",
+      "4. **Use Poppy to generate new hooks & titles based on those patterns.**",
+      "   - Tell Poppy which video or concept you’re working on (e.g. “destroyed Chicago 1s restoration”).",
+      "   - Ask for multiple hook + title options in the style of your best performing videos.",
+      "   - Refine: keep the ones that feel most like you and most clickable, and discard the rest.",
+      "",
+      "5. **Turn hooks into actual videos.**",
+      "   - Pick 1–3 hooks/titles from this session’s suggestions (see below if present).",
+      "   - Build your thumbnail and intro *around* that hook (don’t bury the best part in the middle).",
+      "   - Make sure the video actually delivers on the promise in the title/thumbnail (no fake outs).",
+      "",
+      "6. **Test, measure, and iterate.**",
+      "   - Release a small batch (e.g. 3–5 videos) with strong, distinct hooks.",
+      "   - Watch CTR, average view duration, and how they compare to your more recent 10k-view uploads.",
+      "   - Come back to Poppy with results so she can help you refine the next batch.",
+      "",
+      "# Next 3 moves",
+      "1. Choose *one* upcoming video concept (a specific shoe / restoration / story) to focus on.",
+      "2. Ask Poppy for 5–10 hook + title options for that exact video, based on your old viral style.",
+      "3. Pick the strongest hook, film that video next, and use Poppy again to improve the next one based on performance.",
+    ];
+
+    const parts = [actionPlanLines.join("\n")];
+
+    if (hookSection) {
+      parts.push("", hookSection);
+    }
+
+    // Note: we intentionally DO NOT add a full conversation snapshot anymore
+    // to avoid just duplicating the chat.
+
+    return parts.join("\n");
+  };
+
+  const handleExportTextFile = () => {
+    const summary = buildLocalSummary();
+
+    const blob = new Blob([summary], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "poppy-action-plan.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportGoogleDoc = async () => {
+    const summary = buildLocalSummary();
+
+    try {
+      const res = await fetch("/api/export-google-doc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Poppy Action Plan",
+          content: summary,
+        }),
+      });
+
+      if (!res.ok) {
+        alert("Could not export to Google Docs 😭");
+        return;
+      }
+
+      const data = await res.json();
+      if (data.docUrl) {
+        window.open(data.docUrl, "_blank");
+      } else {
+        alert("Exported, but I couldn't find the doc URL.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong talking to the export API.");
+    }
+  };
+
   const showPendingTranscript = isListening && !!pendingTranscript;
 
   return (
@@ -580,19 +740,19 @@ export default function Home() {
               <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
                 {/* Google Docs MCP Export button */}
                 <button
-                  onClick={() => console.log("export into google docs via mcp")}
-                  className={`px-3 py-1 rounded-full transition flex items-center gap-1`}
+                  onClick={handleExportGoogleDoc}
+                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
                 >
-                  <span>{"Google Docs"}</span>
+                  <span>Google Docs</span>
                 </button>
               </div>
               <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
                 {/* Text File Export button */}
                 <button
-                  onClick={() => console.log("export into txt file")}
-                  className={`px-3 py-1 rounded-full transition flex items-center gap-1`}
+                  onClick={handleExportTextFile}
+                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
                 >
-                  <span>{"Text File"}</span>
+                  <span>Text File</span>
                 </button>
               </div>
               <span className="text-[10px] md:text-xs uppercase tracking-wide text-[#F2E8DC]/60">
