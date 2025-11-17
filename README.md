@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-## Getting Started
 
-First, run the development server:
+### Issue: What exactly did we fix with the double messages?
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+The root bug was this pattern (what you had before):
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+setMessages((prev) => {
+  const updated = [...prev, { role: "user", content: transcript }];
+  void sendToPoppy(updated);  // ❌ side-effect inside setState updater
+  return updated;
+});
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Two important things here:
 
-## Learn More
+Side-effect inside the state updater
 
-To learn more about Next.js, take a look at the following resources:
+The updater function passed to setMessages is supposed to be pure:
+“Given prev, return the next state.”
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+We were doing something extra: calling sendToPoppy(updated) inside that updater. That’s a side-effect.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+React 18 dev mode runs updaters twice
 
-## Deploy on Vercel
+In development, React Strict Mode intentionally calls those updaters twice to detect unsafe side effects.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+That means this block ran 2x for the same voice input:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1st call → sendToPoppy(updated) ✅
+
+2nd call → sendToPoppy(updated) 😬
+
+Result: two API calls, two replies, two assistant messages.
+The browser’s speech engine cancels the first utterance when the second one starts, so you only hear the second.
+
+What we changed:
+
+We removed side-effects from the updater.
+
+We started using a messagesRef and providerRef so callbacks always “see” the latest data.
+
+We call sendToPoppy once per onresult, outside of setMessages:
+
+recognition.onresult = (event) => {
+  const transcript = event.results[0][0].transcript;
+
+  const currentProvider = providerRef.current;
+
+  const updated = [
+    ...messagesRef.current,
+    { role: "user", content: transcript },
+  ];
+
+  // 1) Pure state update
+  setMessages(updated);
+
+  // 2) Side-effect: send to backend ONCE
+  sendToPoppy(updated, currentProvider).finally(() => {
+    isProcessingRef.current = false;
+  });
+};
+
+
+And we:
+
+synced messagesRef with state in a useEffect, and
+
+used isProcessingRef as a guard in case onresult fires twice in dev.
+
+So the fix in one sentence:
+
+We stopped doing side effects inside the React state updater (which dev-mode runs twice) and moved them into a normal function using refs, so each voice turn only triggers one API call.
