@@ -5,6 +5,49 @@ import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+const isEmojiChar = (char: string): boolean => {
+  if (!char) return false;
+  const codePoint = char.codePointAt(0);
+  if (codePoint === undefined) return false;
+  return (
+    (codePoint >= 0x1f300 && codePoint <= 0x1f6ff) || // Misc symbols + pictographs
+    (codePoint >= 0x1f900 && codePoint <= 0x1f9ff) || // Supplemental symbols & pictographs
+    (codePoint >= 0x1f680 && codePoint <= 0x1f6c5) || // Transport & map
+    (codePoint >= 0x2600 && codePoint <= 0x27bf) || // Misc dingbats
+    (codePoint >= 0x1fa70 && codePoint <= 0x1faff) // Symbols & pictographs extended-A
+  );
+};
+
+const getTypingDelayForChar = (char: string): number => {
+  if (!char) return 38;
+
+  if (char === "\n") {
+    return 420;
+  }
+
+  if (isEmojiChar(char)) {
+    return 420;
+  }
+
+  if (".!?".includes(char)) {
+    return 520;
+  }
+
+  if (",;:".includes(char)) {
+    return 260;
+  }
+
+  if (char === " ") {
+    return 85;
+  }
+
+  if (char === "-") {
+    return 95;
+  }
+
+  return 48;
+};
+
 type Provider = "openai" | "claude";
 
 type Message = {
@@ -50,6 +93,7 @@ export default function Home() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const isMutedRef = useRef(false);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const typingControllerRef = useRef<{ cancel: () => void } | null>(null);
 
   // Scroll container ref
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -208,6 +252,96 @@ export default function Home() {
     }
   };
 
+  const typeOutAssistantReply = async (
+    fullText: string,
+    providerUsed: Provider = providerRef.current
+  ) => {
+    const text = fullText || "";
+
+    // Finish any ongoing typing animation
+    if (typingControllerRef.current) {
+      typingControllerRef.current.cancel();
+      typingControllerRef.current = null;
+    }
+
+    const targetIndex = messagesRef.current.length;
+    const newMessage: Message = {
+      role: "assistant",
+      content: "",
+      provider: providerUsed,
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+
+    if (!text) {
+      return;
+    }
+
+    const updateMessageContent = (nextText: string) => {
+      setMessages((prev) => {
+        if (!prev[targetIndex]) return prev;
+        const cloned = [...prev];
+        cloned[targetIndex] = {
+          ...cloned[targetIndex],
+          content: nextText,
+        };
+        return cloned;
+      });
+    };
+
+    let cancelled = false;
+    const controller = {
+      cancel: () => {
+        cancelled = true;
+        updateMessageContent(text);
+      },
+    };
+    typingControllerRef.current = controller;
+
+    const startTyping = () => {
+      let charIndex = 0;
+      const typeNext = () => {
+        if (cancelled) return;
+
+        charIndex = Math.min(charIndex + 1, text.length);
+        updateMessageContent(text.slice(0, charIndex));
+
+        if (charIndex >= text.length) {
+          typingControllerRef.current = null;
+          return;
+        }
+
+        const typedChar = text.charAt(charIndex - 1);
+        const delay = getTypingDelayForChar(typedChar);
+
+        const timeoutId =
+          typeof window === "undefined"
+            ? (setTimeout(typeNext, delay) as unknown as number)
+            : window.setTimeout(typeNext, delay);
+
+        if (timeoutId && typeof window !== "undefined") {
+          const prevCancel = controller.cancel;
+          controller.cancel = () => {
+            prevCancel();
+            window.clearTimeout(timeoutId);
+          };
+        }
+      };
+
+      typeNext();
+    };
+
+    try {
+      await speak(text);
+    } catch (err) {
+      console.warn("TTS playback failed, continuing typing", err);
+    } finally {
+      startTyping();
+    }
+
+    return;
+  };
+
   // 🛰 Send history + provider + content links + docs to /api/poppy-chat
   const sendToPoppy = async (
     allMessages: Message[],
@@ -242,16 +376,7 @@ export default function Home() {
 
       setIsThinking(false);
 
-      const updated: Message[] = [
-        ...messagesRef.current,
-        {
-          role: "assistant",
-          content: reply,
-          provider: usedProvider, // which LLM answered
-        },
-      ];
-      setMessages(updated);
-      speak(reply);
+      void typeOutAssistantReply(reply, usedProvider);
     } catch (err) {
       console.error(err);
       setIsThinking(false);
@@ -264,11 +389,7 @@ export default function Home() {
     if (messagesRef.current.length === 0) {
       const intro =
         "Hey, I’m Poppy 👋 I’m your AI content buddy. Tell me what kind of content you make, and I’ll help you turn it into banger posts. What platform are you most active on right now?";
-      const updated: Message[] = [
-        { role: "assistant", content: intro, provider: "claude" }, // default brain
-      ];
-      setMessages(updated);
-      speak(intro);
+      void typeOutAssistantReply(intro, "claude");
     }
   };
 
