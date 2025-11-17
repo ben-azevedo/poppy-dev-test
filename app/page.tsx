@@ -84,6 +84,25 @@ type ContentDoc = {
   text: string;
 };
 
+type BoardDoc = {
+  id: string;
+  name: string;
+  text: string;
+};
+
+type Board = {
+  id: string;
+  title: string;
+  description: string;
+  links: string[];
+  docs: BoardDoc[];
+};
+
+const generateId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? (crypto as Crypto).randomUUID()
+    : Math.random().toString(36).slice(2);
+
 export default function Home() {
   const [showOrb, setShowOrb] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -107,6 +126,11 @@ export default function Home() {
 
   // Text docs state
   const [contentDocs, setContentDocs] = useState<ContentDoc[]>([]);
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [boardTitleInput, setBoardTitleInput] = useState("");
+  const [boardDescriptionInput, setBoardDescriptionInput] = useState("");
+  const [boardLinkInput, setBoardLinkInput] = useState("");
 
   // Refs to avoid stale state in callbacks
   const providerRef = useRef<Provider>("claude");
@@ -117,6 +141,21 @@ export default function Home() {
   const isMutedRef = useRef(false);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const typingControllerRef = useRef<{ cancel: () => void } | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const analyserFrameRef = useRef<number | null>(null);
+  const [orbAudioLevels, setOrbAudioLevels] = useState({
+    bass: 0,
+    mid: 0,
+    treble: 0,
+  });
+  const orbAudioLevelsRef = useRef(orbAudioLevels);
+  const waveformDataRef = useRef<Float32Array | null>(null);
+  const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const orbCanvasRafRef = useRef<number | null>(null);
+  const poppyImageRef = useRef<HTMLDivElement | null>(null);
+  const poppyMotionRafRef = useRef<number | null>(null);
 
   // Scroll container ref
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -146,6 +185,322 @@ export default function Home() {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    orbAudioLevelsRef.current = orbAudioLevels;
+  }, [orbAudioLevels]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("poppyBoards");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as Board[];
+        setBoards(parsed);
+        if (parsed.length > 0) {
+          setSelectedBoardId(parsed[0].id);
+        }
+      } catch (err) {
+        console.warn("Failed to parse stored boards", err);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("poppyBoards", JSON.stringify(boards));
+  }, [boards]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const wrapper = poppyImageRef.current;
+    if (!wrapper) return;
+
+    const stopMotion = () => {
+      if (poppyMotionRafRef.current !== null) {
+        window.cancelAnimationFrame(poppyMotionRafRef.current);
+        poppyMotionRafRef.current = null;
+      }
+    };
+
+    const resetTransform = () => {
+      wrapper.style.transform = "translate(-50%, -50%) scale(0.95) rotate(0deg)";
+    };
+
+    if (!isSpeaking) {
+      stopMotion();
+      resetTransform();
+      return;
+    }
+
+    const animate = () => {
+      const t = performance.now() / 1000;
+      const scale =
+        0.92 +
+        (Math.sin(t * 2.2) + 1) * 0.04 +
+        orbAudioLevelsRef.current.mid * 0.07;
+      const rotation = (t * 260 + orbAudioLevelsRef.current.bass * 80) % 360;
+      wrapper.style.transform = `translate(-50%, -50%) scale(${scale}) rotate(${rotation}deg)`;
+      poppyMotionRafRef.current = window.requestAnimationFrame(animate);
+    };
+
+    poppyMotionRafRef.current = window.requestAnimationFrame(animate);
+
+    return () => {
+      stopMotion();
+      resetTransform();
+    };
+  }, [isSpeaking]);
+
+  const stopVisualizer = () => {
+    if (typeof window !== "undefined" && analyserFrameRef.current !== null) {
+      window.cancelAnimationFrame(analyserFrameRef.current);
+      analyserFrameRef.current = null;
+    }
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.disconnect();
+      } catch (err) {
+        console.warn("Audio source disconnect failed", err);
+      }
+      audioSourceRef.current = null;
+    }
+    if (analyserRef.current) {
+      try {
+        analyserRef.current.disconnect();
+      } catch (err) {
+        console.warn("Analyser disconnect failed", err);
+      }
+      analyserRef.current = null;
+    }
+    setOrbAudioLevels({ bass: 0, mid: 0, treble: 0 });
+    waveformDataRef.current = null;
+  };
+
+  const startVisualizer = async (audio: HTMLAudioElement) => {
+    if (typeof window === "undefined") return;
+    const AudioCtx =
+      (window.AudioContext ||
+        (window as any).webkitAudioContext) as
+        | typeof AudioContext
+        | undefined;
+    if (!AudioCtx) return;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioCtx();
+    }
+    const ctx = audioContextRef.current;
+    try {
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+    } catch (err) {
+      console.warn("AudioContext resume failed", err);
+    }
+
+    stopVisualizer();
+
+    try {
+      const source = ctx.createMediaElementSource(audio);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+
+      audioSourceRef.current = source;
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const update = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+
+        const pickAverage = (start: number, end: number) => {
+          const clampedStart = Math.max(0, start);
+          const clampedEnd = Math.min(dataArray.length, end);
+          const length = Math.max(clampedEnd - clampedStart, 1);
+          let sum = 0;
+          for (let i = clampedStart; i < clampedEnd; i++) {
+            sum += dataArray[i] || 0;
+          }
+          return sum / length / 255;
+        };
+
+        const bass = pickAverage(0, Math.floor(dataArray.length * 0.1));
+        const mid = pickAverage(
+          Math.floor(dataArray.length * 0.1),
+          Math.floor(dataArray.length * 0.4)
+        );
+        const treble = pickAverage(
+          Math.floor(dataArray.length * 0.4),
+          Math.floor(dataArray.length * 0.8)
+        );
+
+        setOrbAudioLevels((prev) => ({
+          bass: prev.bass * 0.65 + bass * 0.35,
+          mid: prev.mid * 0.65 + mid * 0.35,
+          treble: prev.treble * 0.65 + treble * 0.35,
+        }));
+
+        const desiredPoints = 96;
+        if (
+          !waveformDataRef.current ||
+          waveformDataRef.current.length !== desiredPoints
+        ) {
+          waveformDataRef.current = new Float32Array(desiredPoints);
+        }
+        const stride = Math.max(
+          1,
+          Math.floor(dataArray.length / waveformDataRef.current.length)
+        );
+        for (let i = 0; i < waveformDataRef.current.length; i++) {
+          const idx = Math.min(dataArray.length - 1, i * stride);
+          waveformDataRef.current[i] = (dataArray[idx] || 0) / 255;
+        }
+
+        if (typeof window !== "undefined") {
+          analyserFrameRef.current = window.requestAnimationFrame(update);
+        }
+      };
+
+      update();
+    } catch (err) {
+      console.warn("Visualizer setup failed", err);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopVisualizer();
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      if (
+        typeof window !== "undefined" &&
+        poppyMotionRafRef.current !== null
+      ) {
+        window.cancelAnimationFrame(poppyMotionRafRef.current);
+        poppyMotionRafRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const draw = () => {
+      const canvas = orbCanvasRef.current;
+      if (!canvas) {
+        orbCanvasRafRef.current = window.requestAnimationFrame(draw);
+        return;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        orbCanvasRafRef.current = window.requestAnimationFrame(draw);
+        return;
+      }
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth * dpr;
+      const height = canvas.clientHeight * dpr;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      ctx.clearRect(0, 0, width, height);
+
+      const waveform = waveformDataRef.current;
+      const cx = width / 2;
+      const cy = height / 2;
+      const baseRadius = Math.min(width, height) / 2 - 6;
+
+      const levels = orbAudioLevelsRef.current;
+      const timeFactor = performance.now() * 0.002;
+      const hueBase = 250 + levels.treble * 80;
+      const strokeGradient = ctx.createLinearGradient(0, 0, width, height);
+      strokeGradient.addColorStop(
+        0,
+        `hsla(${hueBase}, 90%, ${60 + levels.mid * 25}%, 0.95)`
+      );
+      strokeGradient.addColorStop(
+        0.5,
+        `hsla(${hueBase + 30}, 100%, ${50 + levels.bass * 30}%, 0.9)`
+      );
+      strokeGradient.addColorStop(
+        1,
+        `hsla(${hueBase + 70}, 95%, ${55 + levels.treble * 20}%, 0.85)`
+      );
+      const fillGradient = ctx.createRadialGradient(
+        cx,
+        cy,
+        baseRadius * 0.4,
+        cx,
+        cy,
+        baseRadius * 1.2
+      );
+      fillGradient.addColorStop(
+        0,
+        `hsla(${hueBase + 20}, 95%, ${65 + levels.mid * 20}%, 0.22)`
+      );
+      fillGradient.addColorStop(
+        1,
+        `hsla(${hueBase + 50}, 70%, ${40 + levels.bass * 25}%, 0.05)`
+      );
+      ctx.lineWidth = 4.5;
+      ctx.strokeStyle = strokeGradient;
+      ctx.shadowBlur = 35 + levels.mid * 60;
+      ctx.shadowColor = `hsla(${hueBase}, 90%, 65%, ${
+        0.35 + levels.mid * 0.6
+      })`;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+
+      ctx.beginPath();
+      const sampleCount = waveform ? waveform.length : 0;
+      if (sampleCount > 0) {
+        for (let i = 0; i <= sampleCount; i++) {
+          const pct = i / sampleCount;
+          const angle = pct * Math.PI * 2;
+          const magnitude = waveform![i % sampleCount] || 0;
+          const noise =
+            Math.sin(pct * Math.PI * 6 + timeFactor) * 3 * levels.mid;
+          const radius =
+            baseRadius +
+            magnitude * 38 +
+            noise +
+            Math.sin(pct * Math.PI * 2) * 4 * levels.bass;
+          const x = cx + Math.cos(angle) * radius;
+          const y = cy + Math.sin(angle) * radius;
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = fillGradient;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.08)";
+        ctx.stroke();
+      }
+
+      orbCanvasRafRef.current = window.requestAnimationFrame(draw);
+    };
+
+    orbCanvasRafRef.current = window.requestAnimationFrame(draw);
+    return () => {
+      if (orbCanvasRafRef.current !== null) {
+        window.cancelAnimationFrame(orbCanvasRafRef.current);
+        orbCanvasRafRef.current = null;
+      }
+    };
+  }, []);
 
   // 🧠 Setup SpeechRecognition on mount
   useEffect(() => {
@@ -228,7 +583,7 @@ export default function Home() {
       audio?: HTMLAudioElement;
     }) => void
   ): Promise<number | undefined> => {
-    const signalStart = (info?: {
+    const notifyPlaybackStart = (info?: {
       durationMs?: number;
       audio?: HTMLAudioElement;
     }) => {
@@ -239,21 +594,19 @@ export default function Home() {
       }
     };
 
-    // If we're muted, don't play anything
     if (isMutedRef.current) {
       setIsSpeaking(false);
-      signalStart();
+      stopVisualizer();
+      notifyPlaybackStart();
       return undefined;
     }
 
     if (typeof window === "undefined") {
-      signalStart();
+      notifyPlaybackStart();
       return undefined;
     }
 
     try {
-      setIsSpeaking(true);
-
       // Call your ElevenLabs TTS route
       const res = await fetch("/api/poppy-tts", {
         method: "POST",
@@ -264,18 +617,20 @@ export default function Home() {
       if (!res.ok) {
         console.error("TTS request failed", await res.text());
         setIsSpeaking(false);
-        signalStart();
+        notifyPlaybackStart();
         return undefined;
       }
 
-      // Get binary audio back from the server
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
 
-      // Stop any previous audio
       if (audioRef.current) {
-        audioRef.current.pause();
+        try {
+          audioRef.current.pause();
+        } catch {}
         URL.revokeObjectURL(audioRef.current.src);
+        audioRef.current = null;
+        stopVisualizer();
       }
 
       const audio = new Audio(url);
@@ -311,29 +666,42 @@ export default function Home() {
 
       await metadataPromise;
 
-      audio.onended = () => {
-        setIsSpeaking(false);
+      const cleanupAudio = () => {
         URL.revokeObjectURL(url);
-        audioRef.current = null;
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
       };
 
-      // Play the new clip
+      audio.onended = () => {
+        cleanupAudio();
+        stopVisualizer();
+        setIsSpeaking(false);
+      };
+
       await audio.play().then(
         () => {
-          signalStart({ durationMs, audio });
+          setIsSpeaking(true);
+          startVisualizer(audio).catch((err) =>
+            console.warn("Visualizer failed to start", err)
+          );
+          notifyPlaybackStart({ durationMs, audio });
         },
         (err) => {
           console.error("Audio playback error", err);
+          cleanupAudio();
+          stopVisualizer();
           setIsSpeaking(false);
-          signalStart({ durationMs, audio });
+          notifyPlaybackStart({ durationMs });
         }
       );
 
       return durationMs;
     } catch (err) {
       console.error("Error playing TTS audio", err);
+      stopVisualizer();
       setIsSpeaking(false);
-      signalStart();
+      notifyPlaybackStart();
       return undefined;
     }
   };
@@ -411,6 +779,14 @@ export default function Home() {
           animationCleanup();
           animationCleanup = null;
         }
+        if (audioRef.current) {
+          try {
+            audioRef.current.pause();
+          } catch {}
+          audioRef.current = null;
+        }
+        stopVisualizer();
+        setIsSpeaking(false);
         updateMessageContent(text);
         finishTyping();
       },
@@ -542,20 +918,21 @@ export default function Home() {
       return typingPromise;
     };
 
-    let actualDuration: number | undefined;
     let playbackInfo: { durationMs?: number; audio?: HTMLAudioElement } = {};
     try {
-      actualDuration = await speak(text, (info) => {
+      await speak(text, (info) => {
         playbackInfo = info ?? {};
         beginTyping(playbackInfo);
       });
     } catch (err) {
       console.warn("TTS playback failed, continuing typing", err);
     } finally {
+      const infoForTyping =
+        playbackInfo.audio || playbackInfo.durationMs ? playbackInfo : undefined;
       if (!typingStarted) {
-        beginTyping(playbackInfo.durationMs ? playbackInfo : undefined);
+        beginTyping(infoForTyping);
       }
-      await beginTyping(playbackInfo.durationMs ? playbackInfo : undefined);
+      await beginTyping(infoForTyping);
     }
   };
 
@@ -727,6 +1104,109 @@ export default function Home() {
     e.target.value = "";
   };
 
+  const selectedBoard = boards.find((b) => b.id === selectedBoardId) || null;
+
+  const updateBoard = (boardId: string, updater: (board: Board) => Board) => {
+    setBoards((prev) =>
+      prev.map((board) => (board.id === boardId ? updater(board) : board))
+    );
+  };
+
+  const handleCreateBoard = () => {
+    const title = boardTitleInput.trim();
+    const description = boardDescriptionInput.trim();
+    if (!title) {
+      alert("Give your board a name before saving it.");
+      return;
+    }
+    const newBoard: Board = {
+      id: generateId(),
+      title,
+      description,
+      links: [],
+      docs: [],
+    };
+    setBoards((prev) => [newBoard, ...prev]);
+    setSelectedBoardId(newBoard.id);
+    setBoardTitleInput("");
+    setBoardDescriptionInput("");
+  };
+
+  const handleDeleteBoard = (boardId: string) => {
+    setBoards((prev) => prev.filter((b) => b.id !== boardId));
+    if (selectedBoardId === boardId) {
+      setSelectedBoardId((prev) => {
+        const remaining = boards.filter((b) => b.id !== boardId);
+        return remaining[0]?.id ?? null;
+      });
+    }
+  };
+
+  const handleBoardLinkAdd = () => {
+    if (!selectedBoard) {
+      alert("Select a board first.");
+      return;
+    }
+    const trimmed = boardLinkInput.trim();
+    if (!trimmed) return;
+    try {
+      const url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+      const asString = url.toString();
+      if (selectedBoard.links.includes(asString)) {
+        setBoardLinkInput("");
+        return;
+      }
+      updateBoard(selectedBoard.id, (board) => ({
+        ...board,
+        links: [...board.links, asString],
+      }));
+      setBoardLinkInput("");
+    } catch {
+      alert("That doesn't look like a valid URL. Try again?");
+    }
+  };
+
+  const handleBoardDocsUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedBoard) {
+      alert("Select a board to attach files to.");
+      return;
+    }
+    const files = e.target.files as FileList | null;
+    if (!files || files.length === 0) return;
+
+    const uploads: BoardDoc[] = [];
+    const readers: Promise<void>[] = [];
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      const p = new Promise<void>((resolve) => {
+        reader.onload = () => {
+          const text = String(reader.result ?? "");
+          if (text.trim()) {
+            uploads.push({
+              id: generateId(),
+              name: file.name,
+              text,
+            });
+          }
+          resolve();
+        };
+      });
+      readers.push(p);
+      reader.readAsText(file);
+    });
+
+    Promise.all(readers).then(() => {
+      if (uploads.length) {
+        updateBoard(selectedBoard.id, (board) => ({
+          ...board,
+          docs: [...board.docs, ...uploads],
+        }));
+      }
+    });
+
+    e.target.value = "";
+  };
+
   // 🔧 Reusable side link panel
   const LinkPanel = ({ className = "" }: { className?: string }) => (
     <div
@@ -850,6 +1330,178 @@ export default function Home() {
           </div>
         )}
       </div>
+    </div>
+  );
+
+  const BoardPanel = ({ className = "" }: { className?: string }) => (
+    <div
+      className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
+    >
+      <div>
+        <p className="text-xs md:text-sm text-[#F2E8DC]/80">
+          Build <strong>Boards</strong> — collections of links + files about one
+          concept (e.g. “Holiday Ads”, “Landing Pages”, “Email Swipe”). I’ll keep
+          them ready to reference next time.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <input
+          value={boardTitleInput}
+          onChange={(e) => setBoardTitleInput(e.target.value)}
+          placeholder="Board name"
+          className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+        />
+        <textarea
+          value={boardDescriptionInput}
+          onChange={(e) => setBoardDescriptionInput(e.target.value)}
+          placeholder="Short description (optional)"
+          rows={3}
+          className="w-full rounded-2xl px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+        />
+        <button
+          onClick={handleCreateBoard}
+          className="rounded-full px-4 py-2 bg-[#F27979] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#f59797] transition"
+        >
+          Create board
+        </button>
+      </div>
+
+      {boards.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-[11px] text-[#F2E8DC]/60">Your boards:</p>
+          <div className="flex flex-col gap-2">
+            {boards.map((board) => (
+              <div
+                key={board.id}
+                className={`rounded-2xl px-3 py-2 border flex items-start justify-between gap-2 ${
+                  board.id === selectedBoardId
+                    ? "border-[#7E84F2] bg-[#7E84F2]/20"
+                    : "border-[#7E84F2]/30 bg-transparent"
+                }`}
+              >
+                <button
+                  onClick={() => setSelectedBoardId(board.id)}
+                  className="text-left flex-1"
+                >
+                  <p className="text-xs md:text-sm font-semibold text-[#F2E8DC]">
+                    {board.title}
+                  </p>
+                  {board.description && (
+                    <p className="text-[11px] text-[#F2E8DC]/60">
+                      {board.description}
+                    </p>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleDeleteBoard(board.id)}
+                  className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-[#F2E8DC]/60">
+          No boards yet — add one above to start organizing references.
+        </p>
+      )}
+
+      {selectedBoard && (
+        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
+          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
+            <span className="font-semibold">{selectedBoard.title}</span>{" "}
+            {selectedBoard.description
+              ? `• ${selectedBoard.description}`
+              : ""}
+          </p>
+
+          <div className="space-y-2">
+            <input
+              value={boardLinkInput}
+              onChange={(e) => setBoardLinkInput(e.target.value)}
+              placeholder="https:// link for this board"
+              className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+            />
+            <button
+              onClick={handleBoardLinkAdd}
+              className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition self-start"
+            >
+              Add link to board
+            </button>
+          </div>
+
+          {selectedBoard.links.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[11px] text-[#F2E8DC]/60">Links:</p>
+              <div className="flex flex-wrap gap-2">
+                {selectedBoard.links.map((link) => (
+                  <span
+                    key={link}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
+                  >
+                    <span className="truncate max-w-[140px] md:max-w-[180px]">
+                      {link}
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateBoard(selectedBoard.id, (board) => ({
+                          ...board,
+                          links: board.links.filter((l) => l !== link),
+                        }))
+                      }
+                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <p className="text-[11px] text-[#F2E8DC]/60">Upload docs:</p>
+            <input
+              type="file"
+              multiple
+              accept=".txt,.md,.markdown,.csv"
+              onChange={handleBoardDocsUpload}
+              className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
+            />
+            {selectedBoard.docs.length > 0 && (
+              <div className="max-h-32 md:max-h-40 overflow-y-auto space-y-1">
+                <p className="text-[11px] text-[#F2E8DC]/60 mb-1">
+                  Docs in this board:
+                </p>
+                {selectedBoard.docs.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
+                  >
+                    <span className="truncate max-w-[140px] md:max-w-[180px]">
+                      {doc.name}
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateBoard(selectedBoard.id, (board) => ({
+                          ...board,
+                          docs: board.docs.filter((d) => d.id !== doc.id),
+                        }))
+                      }
+                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1031,6 +1683,40 @@ export default function Home() {
 
   const showPendingTranscript = isListening && !!pendingTranscript;
 
+  const baseOrbScale = isListening
+    ? 1.1
+    : isSpeaking
+    ? 1.05
+    : isThinking
+    ? 1.03
+    : 1;
+  const audioScale =
+    isSpeaking && orbAudioLevels.bass > 0
+      ? 1 + orbAudioLevels.bass * 0.08
+      : 1;
+  const innerOrbStyle = {
+    transform: `scale(${baseOrbScale * audioScale})`,
+    boxShadow: `0 0 ${40 + orbAudioLevels.mid * 90}px rgba(126,132,242,${
+      0.3 + orbAudioLevels.mid * 0.65
+    })`,
+    borderColor: `rgba(242,232,220,${
+      0.18 + orbAudioLevels.treble * 0.7
+    })`,
+    filter: `saturate(${1 + orbAudioLevels.treble * 0.5})`,
+  };
+  const auraStyle = {
+    opacity:
+      orbState === "speaking"
+        ? 0.55 + orbAudioLevels.mid * 0.35
+        : orbState === "thinking"
+        ? 0.45
+        : 0.35,
+    transform:
+      orbState === "speaking"
+        ? `scale(${1 + orbAudioLevels.bass * 0.12})`
+        : undefined,
+  };
+
   return (
     <main
       className={`relative min-h-screen bg-[#0D0D0D] text-[#F2E8DC] flex flex-col items-center px-4 ${
@@ -1107,15 +1793,31 @@ export default function Home() {
             </div>
           </div>
           <div className="absolute top-4 right-4 flex items-center gap-3 z-20">
-            {/* Export toggle */}
+            {/* Export buttons */}
             <div className="flex items-center gap-2">
+              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
+                {/* Text File Export button */}
+                <button
+                  onClick={handleExportTextFile}
+                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
+                >
+                  <span>Text File</span>
+                </button>
+              </div>
               <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
                 {/* Google Docs MCP Export button */}
                 <button
                   onClick={handleExportGoogleDoc}
                   className="px-3 py-1 rounded-full transition flex items-center gap-1"
                 >
-                  <span>Google Docs</span>
+                  <Image
+                    src="/icons/google.svg"
+                    alt="GoogleDocs"
+                    width={16}
+                    height={16}
+                    className={`w-4 h-4 object-contain invert opacity-80`}
+                  />
+                  <span>{" - Google Docs"}</span>
                 </button>
               </div>
               <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
@@ -1124,16 +1826,14 @@ export default function Home() {
                   onClick={handleExportGoogleDocViaMcp}
                   className="px-3 py-1 rounded-full transition flex items-center gap-1"
                 >
-                  <span>Google Docs (MCP)</span>
-                </button>
-              </div>
-              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
-                {/* Text File Export button */}
-                <button
-                  onClick={handleExportTextFile}
-                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
-                >
-                  <span>Text File</span>
+                  <Image
+                    src="/icons/mcp.svg"
+                    alt="GoogleDocsMCP"
+                    width={16}
+                    height={16}
+                    className={`w-4 h-4 object-contain invert opacity-80`}
+                  />
+                  <span>{" - Google Docs (MCP)"}</span>
                 </button>
               </div>
               <span className="text-[10px] md:text-xs uppercase tracking-wide text-[#F2E8DC]/60">
@@ -1195,6 +1895,7 @@ export default function Home() {
                       : "bg-[#7E84F2]/30"
                   }
                 `}
+                style={auraStyle}
               />
               {/* Rotating ring */}
               <div
@@ -1210,30 +1911,45 @@ export default function Home() {
                 className={`
                   relative rounded-full w-40 h-40 md:w-64 md:h-64
                   flex items-center justify-center
-                  border border-[#F2E8DC]/40
+                  border
                   bg-[radial-gradient(circle_at_25%_20%,#F2E8DC33,transparent_55%),radial-gradient(circle_at_80%_80%,#F2797944,transparent_60%),radial-gradient(circle_at_50%_50%,#150140,#7E84F2)]
                   shadow-[0_0_80px_rgba(126,132,242,0.9)]
                   transition-transform duration-500
-                  ${
-                    orbState === "listening"
-                      ? "scale-110"
-                      : orbState === "speaking"
-                      ? "scale-105"
-                      : orbState === "thinking"
-                      ? "scale-[1.03]"
-                      : "scale-100"
-                  }
                 `}
+                style={innerOrbStyle}
               >
-                <span className="text-sm md:text-base font-semibold text-center px-6 text-[#F2E8DC]">
-                  {isListening
-                    ? "I’m listening… tap when you’re done 🎧"
-                    : orbState === "speaking"
-                    ? "Talking to you…"
-                    : orbState === "thinking"
-                    ? "Let me think… 🧠"
-                    : "Tap to talk to me 💬"}
-                </span>
+                <div className="absolute inset-3 md:inset-5 pointer-events-none">
+                  <canvas
+                    ref={orbCanvasRef}
+                    className="w-full h-full mix-blend-screen opacity-100"
+                  />
+                </div>
+                <div
+                  ref={poppyImageRef}
+                  className="absolute top-1/2 left-1/2 flex items-center justify-center transition-all duration-500 will-change-transform"
+                  style={{
+                    opacity: orbState === "speaking" ? 1 : 0.1,
+                    filter: orbState === "speaking" ? "none" : "grayscale(1)",
+                    transform: "translate(-50%, -50%) scale(0.95) rotate(0deg)",
+                  }}
+                >
+                  <Image
+                    src="/icons/poppy.png"
+                    alt="Poppy"
+                    width={160}
+                    height={160}
+                    className="w-24 h-24 md:w-36 md:h-36 object-contain"
+                  />
+                </div>
+                {(orbState !== "speaking" || isListening) && (
+                  <span className="text-sm md:text-base font-semibold text-center px-6 text-[#F2E8DC] relative z-10">
+                    {isListening
+                      ? "I’m listening… tap when you’re done 🎧"
+                      : orbState === "thinking"
+                      ? "Let me think… 🧠"
+                      : "Tap to talk to me 💬"}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1344,13 +2060,19 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Desktop board panel on the left */}
+          <div className="hidden md:block absolute left-4 top-28 w-80">
+            <BoardPanel />
+          </div>
+
           {/* Desktop side panel on the right */}
           <div className="hidden md:block absolute right-4 top-28 w-80">
             <LinkPanel />
           </div>
 
-          {/* Mobile: link panel below the chat */}
-          <div className="md:hidden w-full max-w-2xl mt-4">
+          {/* Mobile: panels below the chat */}
+          <div className="md:hidden w-full max-w-2xl mt-4 space-y-4">
+            <BoardPanel />
             <LinkPanel />
           </div>
         </>
