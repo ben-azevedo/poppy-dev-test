@@ -18,34 +18,57 @@ const isEmojiChar = (char: string): boolean => {
   );
 };
 
-const getTypingDelayForChar = (char: string): number => {
-  if (!char) return 38;
+const getTypingDelayForChar = (char: string, baseDelay: number): number => {
+  const base = Math.max(18, baseDelay);
+  if (!char) return base;
 
   if (char === "\n") {
-    return 420;
+    return base * 2.3;
   }
 
   if (isEmojiChar(char)) {
-    return 420;
+    return base * 2.5;
   }
 
   if (".!?".includes(char)) {
-    return 520;
+    return base * 2.6;
   }
 
   if (",;:".includes(char)) {
-    return 260;
+    return base * 1.4;
   }
 
   if (char === " ") {
-    return 85;
+    return base * 1.1;
   }
 
   if (char === "-") {
-    return 95;
+    return base * 1.18;
   }
 
-  return 48;
+  return base;
+};
+
+const estimateSpeechDurationMs = (text: string): number => {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  if (!words) return 0;
+  const wordsPerMinute = 225;
+  const minutes = words / wordsPerMinute;
+  return minutes * 60 * 1000;
+};
+
+const computeBaseTypingDelay = (
+  text: string,
+  actualDurationMs?: number
+) => {
+  const durationMs =
+    typeof actualDurationMs === "number" && actualDurationMs > 0
+      ? actualDurationMs
+      : estimateSpeechDurationMs(text);
+  if (!durationMs) return 26;
+  const perChar = durationMs / Math.max(text.length, 1);
+  const adjusted = perChar * 0.68 + 10;
+  return Math.min(70, Math.max(18, adjusted));
 };
 
 type Provider = "openai" | "claude";
@@ -198,15 +221,34 @@ export default function Home() {
   }, []);
 
   // 🔊 Text-to-speech for Poppy's replies
-  const speak = async (text: string) => {
+  const speak = async (
+    text: string,
+    onPlaybackStart?: (info: {
+      durationMs?: number;
+      audio?: HTMLAudioElement;
+    }) => void
+  ): Promise<number | undefined> => {
+    const signalStart = (info?: {
+      durationMs?: number;
+      audio?: HTMLAudioElement;
+    }) => {
+      try {
+        onPlaybackStart?.(info ?? {});
+      } catch (err) {
+        console.error("Error in playback start callback", err);
+      }
+    };
+
     // If we're muted, don't play anything
     if (isMutedRef.current) {
       setIsSpeaking(false);
-      return;
+      signalStart();
+      return undefined;
     }
 
     if (typeof window === "undefined") {
-      return;
+      signalStart();
+      return undefined;
     }
 
     try {
@@ -222,7 +264,8 @@ export default function Home() {
       if (!res.ok) {
         console.error("TTS request failed", await res.text());
         setIsSpeaking(false);
-        return;
+        signalStart();
+        return undefined;
       }
 
       // Get binary audio back from the server
@@ -238,6 +281,36 @@ export default function Home() {
       const audio = new Audio(url);
       audioRef.current = audio;
 
+      let durationMs: number | undefined;
+      const metadataPromise = new Promise<void>((resolve) => {
+        const capture = () => {
+          if (
+            typeof audio.duration === "number" &&
+            isFinite(audio.duration) &&
+            audio.duration > 0
+          ) {
+            durationMs = audio.duration * 1000;
+          }
+          resolve();
+        };
+
+        if (audio.readyState >= 1) {
+          capture();
+        } else {
+          const handler = () => {
+            audio.removeEventListener("loadedmetadata", handler);
+            capture();
+          };
+          audio.addEventListener("loadedmetadata", handler);
+          setTimeout(() => {
+            audio.removeEventListener("loadedmetadata", handler);
+            capture();
+          }, 300);
+        }
+      });
+
+      await metadataPromise;
+
       audio.onended = () => {
         setIsSpeaking(false);
         URL.revokeObjectURL(url);
@@ -245,10 +318,23 @@ export default function Home() {
       };
 
       // Play the new clip
-      await audio.play();
+      await audio.play().then(
+        () => {
+          signalStart({ durationMs, audio });
+        },
+        (err) => {
+          console.error("Audio playback error", err);
+          setIsSpeaking(false);
+          signalStart({ durationMs, audio });
+        }
+      );
+
+      return durationMs;
     } catch (err) {
       console.error("Error playing TTS audio", err);
       setIsSpeaking(false);
+      signalStart();
+      return undefined;
     }
   };
 
@@ -289,57 +375,188 @@ export default function Home() {
       });
     };
 
+    let baseDelay = computeBaseTypingDelay(text);
+
     let cancelled = false;
+    let timeoutId: number | null = null;
+    let animationCleanup: (() => void) | null = null;
+    let resolveTyping: (() => void) | null = null;
+    let typingStarted = false;
+
+    const clearScheduled = () => {
+      if (timeoutId == null) return;
+      if (typeof window === "undefined") {
+        clearTimeout(timeoutId);
+      } else {
+        window.clearTimeout(timeoutId);
+      }
+      timeoutId = null;
+    };
+
+    const finishTyping = () => {
+      if (resolveTyping) {
+        const resolveFn = resolveTyping;
+        resolveTyping = null;
+        typingControllerRef.current = null;
+        resolveFn();
+      }
+    };
+
     const controller = {
       cancel: () => {
+        if (cancelled) return;
         cancelled = true;
+        clearScheduled();
+        if (animationCleanup) {
+          animationCleanup();
+          animationCleanup = null;
+        }
         updateMessageContent(text);
+        finishTyping();
       },
     };
     typingControllerRef.current = controller;
 
-    const startTyping = () => {
-      let charIndex = 0;
-      const typeNext = () => {
-        if (cancelled) return;
+    const startTyping = (syncInfo?: {
+      durationMs?: number;
+      audio?: HTMLAudioElement;
+    }) =>
+      new Promise<void>((resolve) => {
+        resolveTyping = resolve;
+        const totalChars = text.length;
 
-        charIndex = Math.min(charIndex + 1, text.length);
-        updateMessageContent(text.slice(0, charIndex));
+        const finalize = () => {
+          clearScheduled();
+          finishTyping();
+        };
 
-        if (charIndex >= text.length) {
-          typingControllerRef.current = null;
+        if (syncInfo?.audio && totalChars > 0) {
+          const audio = syncInfo.audio;
+          const expectedDuration =
+            syncInfo.durationMs && syncInfo.durationMs > 0
+              ? syncInfo.durationMs
+              : totalChars * baseDelay;
+          let rafId: number | null = null;
+          let lastCount = 0;
+
+          const cancelRaf = () => {
+            if (rafId !== null) {
+              if (typeof window !== "undefined") {
+                window.cancelAnimationFrame(rafId);
+              } else {
+                clearTimeout(rafId);
+              }
+              rafId = null;
+            }
+          };
+
+          const step = () => {
+            if (cancelled) {
+              cancelRaf();
+              finalize();
+              return;
+            }
+
+            const durationMs =
+              audio.duration && isFinite(audio.duration) && audio.duration > 0
+                ? audio.duration * 1000
+                : expectedDuration;
+            const progress =
+              durationMs > 0
+                ? (audio.currentTime * 1000) / durationMs
+                : 0;
+            const targetCount = Math.max(
+              lastCount,
+              Math.floor(Math.min(1, progress) * totalChars)
+            );
+
+            if (targetCount > lastCount) {
+              updateMessageContent(text.slice(0, targetCount));
+              lastCount = targetCount;
+            }
+
+            if (progress >= 1 || audio.ended) {
+              updateMessageContent(text);
+              cancelRaf();
+              finalize();
+              return;
+            }
+
+            rafId =
+              typeof window !== "undefined"
+                ? window.requestAnimationFrame(step)
+                : (setTimeout(step, 16) as unknown as number);
+          };
+
+          rafId =
+            typeof window !== "undefined"
+              ? window.requestAnimationFrame(step)
+              : (setTimeout(step, 16) as unknown as number);
+          animationCleanup = () => {
+            cancelRaf();
+          };
           return;
         }
 
-        const typedChar = text.charAt(charIndex - 1);
-        const delay = getTypingDelayForChar(typedChar);
+        let charIndex = 0;
+        const typeNext = () => {
+          if (cancelled) {
+            finalize();
+            return;
+          }
 
-        const timeoutId =
-          typeof window === "undefined"
-            ? (setTimeout(typeNext, delay) as unknown as number)
-            : window.setTimeout(typeNext, delay);
+          charIndex = Math.min(charIndex + 1, totalChars);
+          updateMessageContent(text.slice(0, charIndex));
 
-        if (timeoutId && typeof window !== "undefined") {
-          const prevCancel = controller.cancel;
-          controller.cancel = () => {
-            prevCancel();
-            window.clearTimeout(timeoutId);
-          };
-        }
-      };
+          if (charIndex >= totalChars) {
+            finalize();
+            return;
+          }
 
-      typeNext();
+          const typedChar = text.charAt(charIndex - 1);
+          const delay = getTypingDelayForChar(typedChar, baseDelay);
+
+          timeoutId =
+            typeof window === "undefined"
+              ? (setTimeout(typeNext, delay) as unknown as number)
+              : window.setTimeout(typeNext, delay);
+        };
+
+        animationCleanup = null;
+        typeNext();
+      });
+
+    let typingPromise: Promise<void> | null = null;
+    const beginTyping = (info?: {
+      durationMs?: number;
+      audio?: HTMLAudioElement;
+    }) => {
+      if (info?.durationMs && info.durationMs > 0) {
+        baseDelay = computeBaseTypingDelay(text, info.durationMs * 1.02);
+      }
+      if (typingStarted && typingPromise) {
+        return typingPromise;
+      }
+      typingStarted = true;
+      typingPromise = startTyping(info);
+      return typingPromise;
     };
 
+    let actualDuration: number | undefined;
+    let playbackInfo: { durationMs?: number; audio?: HTMLAudioElement } = {};
     try {
-      await speak(text);
+      actualDuration = await speak(text, (info) => {
+        playbackInfo = info ?? {};
+        beginTyping(playbackInfo);
+      });
     } catch (err) {
       console.warn("TTS playback failed, continuing typing", err);
     } finally {
-      startTyping();
+      if (!typingStarted) {
+        beginTyping(playbackInfo.durationMs ? playbackInfo : undefined);
+      }
+      await beginTyping(playbackInfo.durationMs ? playbackInfo : undefined);
     }
-
-    return;
   };
 
   // 🛰 Send history + provider + content links + docs to /api/poppy-chat
