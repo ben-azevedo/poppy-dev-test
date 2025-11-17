@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "mcp": "tsx mcp-server.ts",
+    "test:mcp": "tsx test-mcp-client.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -12,7 +14,10 @@
     "@ai-sdk/anthropic": "^2.0.44",
     "@ai-sdk/openai": "^2.0.67",
     "@ai-sdk/react": "^2.0.93",
+    "@modelcontextprotocol/sdk": "^1.22.0",
     "ai": "^5.0.93",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
     "googleapis": "^166.0.0",
     "next": "16.0.3",
     "react": "19.2.0",
@@ -29,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.0.3",
     "tailwindcss": "^4",
+    "tsx": "^4.20.6",
     "typescript": "^5"
   }
 }

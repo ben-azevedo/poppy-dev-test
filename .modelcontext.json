@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "poppy-google-docs": {
+      "command": ["npx", "tsx", "mcp-server.ts"],
+      "description": "Poppy MCP server for exporting summaries to Google Docs"
+    }
+  }
+}

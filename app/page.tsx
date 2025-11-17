@@ -657,6 +657,40 @@ export default function Home() {
     }
   };
 
+  const handleExportGoogleDocViaMcp = async () => {
+    const summary = await buildLocalSummary();
+    if (!summary) {
+      alert("I couldn't generate a summary to export 😭");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/export-google-doc-mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Poppy Action Plan (MCP)",
+          content: summary,
+        }),
+      });
+
+      if (!res.ok) {
+        alert("Could not export to Google Docs via MCP 😭");
+        return;
+      }
+
+      const data = await res.json();
+      if (data.docUrl) {
+        window.open(data.docUrl, "_blank");
+      } else {
+        alert("Exported via MCP, but I couldn't find the doc URL.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong talking to the MCP export API.");
+    }
+  };
+
   const showPendingTranscript = isListening && !!pendingTranscript;
 
   return (
@@ -744,6 +778,15 @@ export default function Home() {
                   className="px-3 py-1 rounded-full transition flex items-center gap-1"
                 >
                   <span>Google Docs</span>
+                </button>
+              </div>
+              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
+                {/* MCP Google Docs Export button */}
+                <button
+                  onClick={handleExportGoogleDocViaMcp}
+                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
+                >
+                  <span>Google Docs (MCP)</span>
                 </button>
               </div>
               <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
@@ -848,7 +891,7 @@ export default function Home() {
                   {isListening
                     ? "I’m listening… tap when you’re done 🎧"
                     : orbState === "speaking"
-                    ? "Talking to you… 🎀"
+                    ? "Talking to you…"
                     : orbState === "thinking"
                     ? "Let me think… 🧠"
                     : "Tap to talk to me 💬"}
@@ -932,7 +975,7 @@ export default function Home() {
                     <div
                       className={`px-3 py-2 rounded-2xl max-w-[80%] ${
                         isUser
-                          ? "bg-[#F27979] text-[#0D0D0D] rounded-br-sm"
+                          ? "bg-[#F2E8DC] text-[#0D0D0D] rounded-br-sm"
                           : `${assistantBubbleClasses} rounded-bl-sm`
                       }`}
                     >
