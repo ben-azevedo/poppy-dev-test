@@ -98,6 +98,13 @@ type Board = {
   docs: BoardDoc[];
 };
 
+type SavedChat = {
+  id: string;
+  title: string;
+  savedAt: number;
+  messages: Message[];
+};
+
 const generateId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -128,6 +135,12 @@ export default function Home() {
   const [contentDocs, setContentDocs] = useState<ContentDoc[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
+  const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
+    null
+  );
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editingChatTitle, setEditingChatTitle] = useState("");
   const [boardTitleInput, setBoardTitleInput] = useState("");
   const [boardDescriptionInput, setBoardDescriptionInput] = useState("");
   const [boardLinkInput, setBoardLinkInput] = useState("");
@@ -210,8 +223,28 @@ const poppyMotionRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const storedChats = window.localStorage.getItem("poppySavedChats");
+    if (storedChats) {
+      try {
+        const parsed = JSON.parse(storedChats) as SavedChat[];
+        if (Array.isArray(parsed)) {
+          setSavedChats(parsed);
+        }
+      } catch (err) {
+        console.warn("Failed to parse saved chats", err);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     window.localStorage.setItem("poppyBoards", JSON.stringify(boards));
   }, [boards]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("poppySavedChats", JSON.stringify(savedChats));
+  }, [savedChats]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1212,6 +1245,72 @@ const poppyMotionRafRef = useRef<number | null>(null);
     e.target.value = "";
   };
 
+  const handleSaveCurrentChat = () => {
+    const currentMessages = messagesRef.current;
+    if (!currentMessages.length) return;
+    const timestamp = Date.now();
+    const firstUserLine =
+      currentMessages.find((m) => m.role === "user")?.content.trim() ?? "";
+    const preview =
+      firstUserLine.length > 40
+        ? `${firstUserLine.slice(0, 40)}…`
+        : firstUserLine || "Chat notes";
+    const newChat: SavedChat = {
+      id: generateId(),
+      title: preview || `Chat ${new Date(timestamp).toLocaleString()}`,
+      savedAt: timestamp,
+      messages: currentMessages.map((m) => ({ ...m })),
+    };
+    setSavedChats((prev) => [newChat, ...prev]);
+    setSelectedSavedChatId(newChat.id);
+    setEditingChatId(null);
+    setEditingChatTitle("");
+  };
+
+  const handleSelectSavedChat = (chatId: string) => {
+    const chat = savedChats.find((c) => c.id === chatId);
+    if (!chat) return;
+    setMessages(chat.messages);
+    setSelectedSavedChatId(chatId);
+    setEditingChatId(null);
+    setEditingChatTitle("");
+  };
+
+  const handleDeleteSavedChat = (chatId: string) => {
+    setSavedChats((prev) => prev.filter((chat) => chat.id !== chatId));
+    setSelectedSavedChatId((prev) => (prev === chatId ? null : prev));
+    if (editingChatId === chatId) {
+      setEditingChatId(null);
+      setEditingChatTitle("");
+    }
+  };
+
+  const handleStartEditingChat = (chat: SavedChat) => {
+    setEditingChatId(chat.id);
+    setEditingChatTitle(chat.title || "");
+  };
+
+  const handleCancelEditingChat = () => {
+    setEditingChatId(null);
+    setEditingChatTitle("");
+  };
+
+  const handleSaveEditingChat = () => {
+    if (!editingChatId) return;
+    const trimmed = editingChatTitle.trim();
+    if (!trimmed) {
+      alert("Give this saved chat a short title before saving.");
+      return;
+    }
+    setSavedChats((prev) =>
+      prev.map((chat) =>
+        chat.id === editingChatId ? { ...chat, title: trimmed } : chat
+      )
+    );
+    setEditingChatId(null);
+    setEditingChatTitle("");
+  };
+
   // 🔧 Reusable side link panel
   const LinkPanel = ({ className = "" }: { className?: string }) => {
     const canCreateBoard =
@@ -1520,6 +1619,89 @@ const poppyMotionRafRef = useRef<number | null>(null);
       );
     };
 
+    const renderSavedChats = () => {
+      if (savedChats.length === 0) {
+        return (
+          <p className="text-[11px] text-[#F2E8DC]/50">
+            No saved chats yet. Use the button above after you talk to Poppy.
+          </p>
+        );
+      }
+
+      return (
+        <div className="flex flex-col gap-3 max-h-64 overflow-y-auto">
+          {savedChats.map((chat) => {
+            const isSelected = selectedSavedChatId === chat.id;
+            const isEditing = editingChatId === chat.id;
+            return (
+              <div
+                key={chat.id}
+                className={`rounded-2xl border px-3 py-2 transition ${
+                  isSelected ? "border-[#F27979]" : "border-[#7E84F2]/30"
+                }`}
+              >
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <input
+                      autoFocus
+                      value={editingChatTitle}
+                      onChange={(e) => setEditingChatTitle(e.target.value)}
+                      placeholder="Saved chat title"
+                      className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={handleCancelEditingChat}
+                        className="px-3 py-1 rounded-full text-[11px] border border-[#7E84F2]/40 text-[#F2E8DC]/70 hover:border-[#7E84F2]/80"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveEditingChat}
+                        className="px-3 py-1 rounded-full text-[11px] font-semibold bg-[#7E84F2] text-[#0D0D0D] hover:bg-[#959AF8]"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => handleSelectSavedChat(chat.id)}
+                      className="text-left w-full"
+                    >
+                      <p className="text-xs md:text-sm font-semibold text-[#F2E8DC] truncate">
+                        {chat.title || "Saved chat"}
+                      </p>
+                      <p className="text-[11px] text-[#F2E8DC]/50">
+                        {new Date(chat.savedAt).toLocaleString()}
+                      </p>
+                    </button>
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        onClick={() => handleStartEditingChat(chat)}
+                        className="text-[11px] text-[#F2E8DC]/70 hover:text-[#F2E8DC]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSavedChat(chat.id)}
+                        className="text-[11px] text-[#F27979] hover:text-[#F2A0A0]"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+
+    const canSaveChat = messages.length > 0;
+
     return (
       <div
         className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
@@ -1529,6 +1711,26 @@ const poppyMotionRafRef = useRef<number | null>(null);
         <div className="space-y-2 border-t border-[#7E84F2]/20 pt-3">
           <p className="text-[11px] text-[#F2E8DC]/60">Other boards:</p>
           {renderOtherBoards()}
+        </div>
+
+        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] text-[#F2E8DC]/60 uppercase tracking-wide">
+              Saved chats
+            </p>
+            <button
+              onClick={handleSaveCurrentChat}
+              disabled={!canSaveChat}
+              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                canSaveChat
+                  ? "bg-[#7E84F2] text-[#0D0D0D] hover:bg-[#959AF8]"
+                  : "bg-[#5f5b73] text-[#aaa] cursor-not-allowed"
+              }`}
+            >
+              Save current chat
+            </button>
+          </div>
+          {renderSavedChats()}
         </div>
       </div>
     );
