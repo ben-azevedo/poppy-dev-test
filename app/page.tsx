@@ -1889,7 +1889,7 @@ const poppyMotionRafRef = useRef<number | null>(null);
           <div className="flex flex-col items-center w-full max-w-2xl gap-4 md:gap-6">
             {/* Orb (acts as mic button) */}
             <div
-              className="relative w-56 h-56 md:w-80 md:h-80 flex items-center justify-center cursor-pointer"
+              className="relative w-52 h-52 md:w-72 md:h-72 flex items-center justify-center cursor-pointer"
               onClick={handleToggleListening}
             >
               {/* Outer aura */}
@@ -1921,7 +1921,7 @@ const poppyMotionRafRef = useRef<number | null>(null);
               {/* Inner orb */}
               <div
                 className={`
-                  relative rounded-full w-40 h-40 md:w-64 md:h-64
+                  relative rounded-full w-36 h-36 md:w-60 md:h-60
                   flex items-center justify-center
                   border
                   bg-[radial-gradient(circle_at_25%_20%,#F2E8DC33,transparent_55%),radial-gradient(circle_at_80%_80%,#F2797944,transparent_60%),radial-gradient(circle_at_50%_50%,#150140,#7E84F2)]
