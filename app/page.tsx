@@ -57,10 +57,7 @@ const estimateSpeechDurationMs = (text: string): number => {
   return minutes * 60 * 1000;
 };
 
-const computeBaseTypingDelay = (
-  text: string,
-  actualDurationMs?: number
-) => {
+const computeBaseTypingDelay = (text: string, actualDurationMs?: number) => {
   const durationMs =
     typeof actualDurationMs === "number" && actualDurationMs > 0
       ? actualDurationMs
@@ -134,7 +131,7 @@ export default function Home() {
   // Text docs state
   const [contentDocs, setContentDocs] = useState<ContentDoc[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
-  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [selectedBoardIds, setSelectedBoardIds] = useState<string[]>([]);
   const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
   const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
     null
@@ -145,13 +142,19 @@ export default function Home() {
   const [boardDescriptionInput, setBoardDescriptionInput] = useState("");
   const [boardLinkInput, setBoardLinkInput] = useState("");
   const [boardFormLinks, setBoardFormLinks] = useState<string[]>([]);
-  const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
+const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
+  const [selectedBoardLinkInput, setSelectedBoardLinkInput] = useState("");
+  const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
+  const [editingBoardTitle, setEditingBoardTitle] = useState("");
+  const [editingBoardLinkInput, setEditingBoardLinkInput] = useState("");
+  const [linkTitleMap, setLinkTitleMap] = useState<Record<string, string>>({});
 
   // Refs to avoid stale state in callbacks
   const providerRef = useRef<Provider>("claude");
   const messagesRef = useRef<Message[]>([]);
   const contentLinksRef = useRef<string[]>([]);
   const contentDocsRef = useRef<ContentDoc[]>([]);
+  const linkTitleMapRef = useRef<Record<string, string>>(linkTitleMap);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const isMutedRef = useRef(false);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -170,7 +173,7 @@ export default function Home() {
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const orbCanvasRafRef = useRef<number | null>(null);
   const poppyImageRef = useRef<HTMLDivElement | null>(null);
-const poppyMotionRafRef = useRef<number | null>(null);
+  const poppyMotionRafRef = useRef<number | null>(null);
 
   // Scroll container ref
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -196,6 +199,9 @@ const poppyMotionRafRef = useRef<number | null>(null);
   useEffect(() => {
     contentDocsRef.current = contentDocs;
   }, [contentDocs]);
+  useEffect(() => {
+    linkTitleMapRef.current = linkTitleMap;
+  }, [linkTitleMap]);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
@@ -207,13 +213,66 @@ const poppyMotionRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const allLinks = Array.from(
+      new Set(boards.flatMap((board) => board.links || []))
+    );
+    const missing = allLinks.filter(
+      (link) => link && !linkTitleMapRef.current[link]
+    );
+    if (!missing.length) return;
+
+    let cancelled = false;
+
+    const fetchTitles = async () => {
+      const entries = await Promise.all(
+        missing.map(async (link) => {
+          try {
+            const res = await fetch(
+              `/api/link-metadata?url=${encodeURIComponent(link)}`
+            );
+            if (!res.ok) {
+              return { link, title: null };
+            }
+            const data = await res.json();
+            return {
+              link,
+              title:
+                typeof data?.title === "string" && data.title.trim()
+                  ? data.title.trim()
+                  : null,
+            };
+          } catch {
+            return { link, title: null };
+          }
+        })
+      );
+      if (cancelled) return;
+      setLinkTitleMap((prev) => {
+        const next = { ...prev };
+        for (const entry of entries) {
+          if (!entry) continue;
+          next[entry.link] = entry.title || fallbackTitleFromUrl(entry.link);
+        }
+        return next;
+      });
+    };
+
+    fetchTitles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boards]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem("poppyBoards");
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as Board[];
         setBoards(parsed);
         if (parsed.length > 0) {
-          setSelectedBoardId(parsed[0].id);
+          setSelectedBoardIds([parsed[0].id]);
         }
       } catch (err) {
         console.warn("Failed to parse stored boards", err);
@@ -317,11 +376,8 @@ const poppyMotionRafRef = useRef<number | null>(null);
 
   const startVisualizer = async (audio: HTMLAudioElement) => {
     if (typeof window === "undefined") return;
-    const AudioCtx =
-      (window.AudioContext ||
-        (window as any).webkitAudioContext) as
-        | typeof AudioContext
-        | undefined;
+    const AudioCtx = (window.AudioContext ||
+      (window as any).webkitAudioContext) as typeof AudioContext | undefined;
     if (!AudioCtx) return;
 
     if (!audioContextRef.current) {
@@ -415,10 +471,7 @@ const poppyMotionRafRef = useRef<number | null>(null);
         audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
       }
-      if (
-        typeof window !== "undefined" &&
-        poppyMotionRafRef.current !== null
-      ) {
+      if (typeof window !== "undefined" && poppyMotionRafRef.current !== null) {
         window.cancelAnimationFrame(poppyMotionRafRef.current);
         poppyMotionRafRef.current = null;
       }
@@ -876,9 +929,7 @@ const poppyMotionRafRef = useRef<number | null>(null);
                 ? audio.duration * 1000
                 : expectedDuration;
             const progress =
-              durationMs > 0
-                ? (audio.currentTime * 1000) / durationMs
-                : 0;
+              durationMs > 0 ? (audio.currentTime * 1000) / durationMs : 0;
             const targetCount = Math.max(
               lastCount,
               Math.floor(Math.min(1, progress) * totalChars)
@@ -966,7 +1017,9 @@ const poppyMotionRafRef = useRef<number | null>(null);
       console.warn("TTS playback failed, continuing typing", err);
     } finally {
       const infoForTyping =
-        playbackInfo.audio || playbackInfo.durationMs ? playbackInfo : undefined;
+        playbackInfo.audio || playbackInfo.durationMs
+          ? playbackInfo
+          : undefined;
       if (!typingStarted) {
         beginTyping(infoForTyping);
       }
@@ -1072,12 +1125,22 @@ const poppyMotionRafRef = useRef<number | null>(null);
         setIsThinking(true);
 
         // Use ALL current links + docs + full history
-        void sendToPoppy(
-          updated,
-          currentProvider,
-          contentLinksRef.current,
-          contentDocsRef.current
-        );
+        const linksForChat =
+          selectedBoards.length > 0
+            ? Array.from(
+                new Set(
+                  selectedBoards.flatMap((board) => board.links ?? [])
+                )
+              )
+            : contentLinksRef.current;
+        const docsForChat =
+          selectedBoards.length > 0
+            ? selectedBoards.flatMap((board) =>
+                board.docs.map(({ name, text }) => ({ name, text }))
+              )
+            : contentDocsRef.current;
+
+        void sendToPoppy(updated, currentProvider, linksForChat, docsForChat);
       }
     } else {
       // 👉 User is STARTING a new voice turn
@@ -1162,13 +1225,116 @@ const poppyMotionRafRef = useRef<number | null>(null);
     e.target.value = "";
   };
 
-  const selectedBoard = boards.find((b) => b.id === selectedBoardId) || null;
+  const selectedBoards = selectedBoardIds
+    .map((id) => boards.find((b) => b.id === id) || null)
+    .filter((b): b is Board => b !== null);
+  const selectedBoard = selectedBoards[0] ?? null;
 
   const updateBoard = (boardId: string, updater: (board: Board) => Board) => {
     setBoards((prev) =>
       prev.map((board) => (board.id === boardId ? updater(board) : board))
     );
   };
+
+  const addLinkToBoard = (boardId: string, rawUrl: string): boolean => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return false;
+    try {
+      const url = new URL(
+        trimmed.startsWith("http") ? trimmed : `https://${trimmed}`
+      );
+      const asString = url.toString();
+      let added = false;
+      updateBoard(boardId, (board) => {
+        if (board.links.includes(asString)) {
+          return board;
+        }
+        added = true;
+        return {
+          ...board,
+          links: [...board.links, asString],
+        };
+      });
+      return added;
+    } catch {
+      alert("That doesn't look like a valid URL. Try again?");
+      return false;
+    }
+  };
+
+  const removeLinkFromBoard = (boardId: string, link: string) => {
+    updateBoard(boardId, (board) => ({
+      ...board,
+      links: board.links.filter((l) => l !== link),
+    }));
+  };
+
+  const removeDocFromBoard = (boardId: string, docId: string) => {
+    updateBoard(boardId, (board) => ({
+      ...board,
+      docs: board.docs.filter((doc) => doc.id !== docId),
+    }));
+  };
+
+  const attachDocsToBoard = (boardId: string, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const uploads: BoardDoc[] = [];
+    const readers: Promise<void>[] = [];
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      const p = new Promise<void>((resolve) => {
+        reader.onload = () => {
+          const text = String(reader.result ?? "");
+          if (text.trim()) {
+            uploads.push({
+              id: generateId(),
+              name: file.name,
+              text,
+            });
+          }
+          resolve();
+        };
+      });
+      readers.push(p);
+      reader.readAsText(file);
+    });
+
+    Promise.all(readers).then(() => {
+      if (!uploads.length) return;
+      updateBoard(boardId, (board) => ({
+        ...board,
+        docs: [...board.docs, ...uploads],
+      }));
+    });
+  };
+
+  const toggleBoardSelection = (boardId: string) => {
+    setSelectedBoardIds((prev) => {
+      if (prev.includes(boardId)) {
+        return prev.filter((id) => id !== boardId);
+      }
+      return [boardId, ...prev];
+    });
+  };
+
+  const fallbackTitleFromUrl = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.replace(/^www\./, "");
+      let path = parsed.pathname.replace(/\/$/, "");
+      if (path && path.length > 40) {
+        path = path.slice(0, 37) + "…";
+      }
+      return path ? `${host}${path}` : host || url;
+    } catch {
+      return url;
+    }
+  };
+
+  const getLinkDisplayLabel = (url: string) =>
+    linkTitleMap[url] || fallbackTitleFromUrl(url);
 
   const handleCreateBoard = () => {
     const title = boardTitleInput.trim();
@@ -1181,23 +1347,32 @@ const poppyMotionRafRef = useRef<number | null>(null);
       id: generateId(),
       title,
       description,
-      links: [],
-      docs: [],
+      links: [...boardFormLinks],
+      docs: boardFormDocs.map((doc) => ({ ...doc })),
     };
     setBoards((prev) => [newBoard, ...prev]);
-    setSelectedBoardId(newBoard.id);
+    setSelectedBoardIds((prev) => [newBoard.id, ...prev.filter((id) => id !== newBoard.id)]);
     setBoardTitleInput("");
     setBoardDescriptionInput("");
+    setBoardLinkInput("");
+    setBoardFormLinks([]);
+    setBoardFormDocs([]);
   };
 
   const handleDeleteBoard = (boardId: string) => {
     setBoards((prev) => {
       const next = prev.filter((b) => b.id !== boardId);
-      setSelectedBoardId((current) =>
-        current === boardId ? next[0]?.id ?? null : current
-      );
+      setSelectedBoardIds((current) => {
+        const filtered = current.filter((id) => id !== boardId);
+        if (filtered.length > 0 || next.length === 0) return filtered;
+        return next[0] ? [next[0].id] : [];
+      });
       return next;
     });
+    if (editingBoardId === boardId) {
+      setEditingBoardId(null);
+      setEditingBoardTitle("");
+    }
   };
 
   const handleBoardLinkAdd = () => {
@@ -1205,22 +1380,20 @@ const poppyMotionRafRef = useRef<number | null>(null);
       alert("Select a board first.");
       return;
     }
-    const trimmed = boardLinkInput.trim();
-    if (!trimmed) return;
-    try {
-      const url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
-      const asString = url.toString();
-      if (selectedBoard.links.includes(asString)) {
-        setBoardLinkInput("");
-        return;
-      }
-      updateBoard(selectedBoard.id, (board) => ({
-        ...board,
-        links: [...board.links, asString],
-      }));
+    const success = addLinkToBoard(selectedBoard.id, boardLinkInput);
+    if (success) {
       setBoardLinkInput("");
-    } catch {
-      alert("That doesn't look like a valid URL. Try again?");
+    }
+  };
+
+  const handleAddLinkToSelectedBoard = () => {
+    if (!selectedBoard) {
+      alert("Select a board to add links.");
+      return;
+    }
+    const success = addLinkToBoard(selectedBoard.id, selectedBoardLinkInput);
+    if (success) {
+      setSelectedBoardLinkInput("");
     }
   };
 
@@ -1229,6 +1402,42 @@ const poppyMotionRafRef = useRef<number | null>(null);
       alert("Select a board to attach files to.");
       return;
     }
+    attachDocsToBoard(selectedBoard.id, e.target.files);
+    e.target.value = "";
+  };
+
+  const handleInlineBoardDocsUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    boardId: string
+  ) => {
+    attachDocsToBoard(boardId, e.target.files);
+    e.target.value = "";
+  };
+
+  const handleAddBoardFormLink = () => {
+    const trimmed = boardLinkInput.trim();
+    if (!trimmed) return;
+    try {
+      const url = new URL(
+        trimmed.startsWith("http") ? trimmed : `https://${trimmed}`
+      );
+      const asString = url.toString();
+      setBoardFormLinks((prev) =>
+        prev.includes(asString) ? prev : [...prev, asString]
+      );
+      setBoardLinkInput("");
+    } catch {
+      alert("That doesn't look like a valid URL. Try again?");
+    }
+  };
+
+  const handleRemoveBoardFormLink = (link: string) => {
+    setBoardFormLinks((prev) => prev.filter((l) => l !== link));
+  };
+
+  const handleBoardFormDocsUpload = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const files = e.target.files as FileList | null;
     if (!files || files.length === 0) return;
 
@@ -1255,14 +1464,15 @@ const poppyMotionRafRef = useRef<number | null>(null);
 
     Promise.all(readers).then(() => {
       if (uploads.length) {
-        updateBoard(selectedBoard.id, (board) => ({
-          ...board,
-          docs: [...board.docs, ...uploads],
-        }));
+        setBoardFormDocs((prev) => [...prev, ...uploads]);
       }
     });
 
     e.target.value = "";
+  };
+
+  const handleRemoveBoardFormDoc = (docId: string) => {
+    setBoardFormDocs((prev) => prev.filter((doc) => doc.id !== docId));
   };
 
   const handleSaveCurrentChat = () => {
@@ -1294,6 +1504,60 @@ const poppyMotionRafRef = useRef<number | null>(null);
     setSelectedSavedChatId(chatId);
     setEditingChatId(null);
     setEditingChatTitle("");
+  };
+
+  const handleSaveSelectedBoard = () => {
+    if (!selectedBoards.length) {
+      alert("Select at least one board to save.");
+      return;
+    }
+    const nextLinks = [...contentLinksRef.current];
+    const nextDocs: BoardDoc[] = contentDocsRef.current.map((doc) => ({
+      id: generateId(),
+      name: doc.name,
+      text: doc.text,
+    }));
+    setBoards((prev) =>
+      prev.map((board) =>
+        selectedBoardIds.includes(board.id)
+          ? {
+              ...board,
+              links: nextLinks,
+              docs: nextDocs,
+            }
+          : board
+      )
+    );
+  };
+
+  const handleStartEditingBoardTitle = (board: Board) => {
+    setEditingBoardId(board.id);
+    setEditingBoardTitle(board.title);
+    setEditingBoardLinkInput("");
+    setSelectedBoardIds((prev) => [board.id, ...prev.filter((id) => id !== board.id)]);
+  };
+
+  const handleCancelEditingBoardTitle = () => {
+    setEditingBoardId(null);
+    setEditingBoardTitle("");
+    setEditingBoardLinkInput("");
+  };
+
+  const handleSaveEditingBoardTitle = () => {
+    if (!editingBoardId) return;
+    const trimmed = editingBoardTitle.trim();
+    if (!trimmed) {
+      alert("Give this board a title before saving.");
+      return;
+    }
+    setBoards((prev) =>
+      prev.map((board) =>
+        board.id === editingBoardId ? { ...board, title: trimmed } : board
+      )
+    );
+    setEditingBoardId(null);
+    setEditingBoardTitle("");
+    setEditingBoardLinkInput("");
   };
 
   const handleDeleteSavedChat = (chatId: string) => {
@@ -1336,146 +1600,128 @@ const poppyMotionRafRef = useRef<number | null>(null);
     const canCreateBoard =
       boardTitleInput.trim().length > 0 &&
       (boardFormLinks.length > 0 || boardFormDocs.length > 0);
+    const canSaveCurrentBoard =
+      selectedBoards.length > 0 &&
+      (contentLinks.length > 0 || contentDocs.length > 0);
 
     return (
       <div
         className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
       >
-        <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-          Paste links to your best-performing{" "}
-          <strong>ads, sales pages, or videos</strong> (YouTube / Instagram /
-          TikTok / etc.).
-          <br />
-          <br />
-          Poppy will study them as your{" "}
-          <span className="text-[#F27979] font-semibold">
-            source content brain
-          </span>{" "}
-          so she can mirror the structure and vibe in new hooks, scripts, and
-          copy.
-        </p>
+        {/* Board Creator - right column */}
+        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
+          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
+            Build <strong>Boards</strong> from these assets (name, description,
+            board-specific links/files), then save them for quick recall later.
+          </p>
 
-        {/* Global links input */}
-        <div className="flex flex-col gap-2">
+          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
+            Poppy will study them as your{" "}
+            <span className="text-[#F27979] font-semibold">
+              source content brain
+            </span>{" "}
+            so she can mirror the structure and vibe in new hooks, scripts, and
+            copy.
+          </p>
+
           <input
-            value={linkInput}
-            onChange={(e) => setLinkInput(e.target.value)}
-            placeholder="https://youtube.com/watch?... or https://www.instagram.com/..."
-            className="rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+            value={boardTitleInput}
+            onChange={(e) => setBoardTitleInput(e.target.value)}
+            placeholder="Board title"
+            className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
           />
-          <button
-            onClick={() => {
-              const trimmed = linkInput.trim();
-              if (!trimmed) return;
 
-              try {
-                const url = new URL(
-                  trimmed.startsWith("http") ? trimmed : `https://${trimmed}`
-                );
-                const asString = url.toString();
-                if (!contentLinksRef.current.includes(asString)) {
-                  const newLinks = [...contentLinksRef.current, asString];
-                  setContentLinks(newLinks);
-                }
-                setLinkInput("");
-              } catch {
-                alert("That doesn't look like a valid URL. Try again?");
-              }
-            }}
-            className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition self-start"
-          >
-            Add link
-          </button>
-        </div>
+          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
+            Paste links to your best-performing{" "}
+            <strong>ads, sales pages, or videos</strong> (YouTube / Instagram /
+            TikTok / etc.).
+            <br />
+          </p>
 
-        {contentLinks.length > 0 && (
-          <div className="mt-1 max-h-32 md:max-h-40 overflow-y-auto">
-            <p className="text-[11px] text-[#F2E8DC]/60 mb-1">
-              Your content sources:
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {contentLinks.map((link) => (
-                <span
-                  key={link}
-                  className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
-                >
-                  <span className="truncate max-w-[140px] md:max-w-[180px]">
-                    {link}
-                  </span>
-                  <button
-                    onClick={() => {
-                      const newLinks = contentLinksRef.current.filter(
-                        (l) => l !== link
-                      );
-                      setContentLinks(newLinks);
-                    }}
-                    className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
+          {/* Add Links */}
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                value={boardLinkInput}
+                onChange={(e) => setBoardLinkInput(e.target.value)}
+                placeholder="Link only for this board"
+                className="flex-1 rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+              />
+              <button
+                onClick={handleAddBoardFormLink}
+                className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition"
+              >
+                Add link
+              </button>
             </div>
-          </div>
-        )}
 
-        {/* Global text docs upload */}
-        <div className="pt-2 border-t border-[#7E84F2]/20 space-y-2">
+            {boardFormLinks.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {boardFormLinks.map((link) => (
+                  <span
+                    key={link}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
+                  >
+                    <span className="truncate max-w-[140px] md:max-w-[180px]">
+                    {getLinkDisplayLabel(link)}
+                    </span>
+                    <button
+                      onClick={() => handleRemoveBoardFormLink(link)}
+                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <p className="text-xs md:text-sm text-[#F2E8DC]/80">
             Or drop in <strong>.txt / .md</strong> docs with{" "}
             <strong>pain points, ICP, email copy</strong>, etc. I’ll read them
             as part of your content brain.
           </p>
 
-          <input
-            type="file"
-            multiple
-            accept=".txt,.md,.markdown,.csv"
-            onChange={handleFileUpload}
-            className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
-          />
-
-          {contentDocs.length > 0 && (
-            <div className="max-h-32 md:max-h-40 overflow-y-auto space-y-1">
-              <p className="text-[11px] text-[#F2E8DC]/60 mb-1">Text docs:</p>
-              {contentDocs.map((doc, idx) => (
-                <div
-                  key={`${doc.name}-${idx}`}
-                  className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
-                >
-                  <span className="truncate max-w-[140px] md:max-w-[180px]">
-                    {doc.name}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setContentDocs((prev) =>
-                        prev.filter((_, i) => i !== idx)
-                      );
-                    }}
-                    className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+          {/* Add Files */}
+          <div className="space-y-2">
+            <input
+              type="file"
+              multiple
+              accept=".txt,.md,.markdown,.csv"
+              onChange={handleBoardFormDocsUpload}
+              className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
+            />
+            {boardFormDocs.length > 0 && (
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {boardFormDocs.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
                   >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <span className="truncate max-w-[140px] md:max-w-[180px]">
+                      {doc.name}
+                    </span>
+                    <button
+                      onClick={() => handleRemoveBoardFormDoc(doc.id)}
+                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-        {/* Board builder */}
-        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
-          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-            Build <strong>Boards</strong> from these assets (name + description
-            + board-specific links/files), then save them for quick recall
-            later.
+          <p className="text-xs md:text-sm text-[#F2E8DC]/70">
+            <strong>
+              To create a board, enter a board title and add at least one
+              board-specific link or file.
+            </strong>
           </p>
-          <input
-            value={boardTitleInput}
-            onChange={(e) => setBoardTitleInput(e.target.value)}
-            placeholder="Board name"
-            className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-          />
 
+          {/* Create a Board */}
           <div className="pt-1 space-y-2">
             <button
               onClick={handleCreateBoard}
@@ -1488,12 +1734,6 @@ const poppyMotionRafRef = useRef<number | null>(null);
             >
               Create board
             </button>
-            <p className="text-xs md:text-sm text-[#F2E8DC]/70">
-              <strong>
-                To create a board, enter a name and add at least one
-                board-specific link or file.
-              </strong>
-            </p>
           </div>
         </div>
       </div>
@@ -1501,140 +1741,217 @@ const poppyMotionRafRef = useRef<number | null>(null);
   };
 
   const BoardDisplayPanel = ({ className = "" }: { className?: string }) => {
-    const otherBoards = boards.filter((b) => b.id !== selectedBoardId);
 
-    const renderSelected = () => {
-      if (!selectedBoard) {
-        return (
-          <p className="text-xs md:text-sm text-[#F2E8DC]/70">
-            <strong>Select your board(s).</strong>
-          </p>
-        );
-      }
-
-      return (
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm md:text-base font-semibold text-[#F2E8DC]">
-                {selectedBoard.title}
-              </p>
-              {selectedBoard.description && (
-                <p className="text-xs md:text-sm text-[#F2E8DC]/70">
-                  {selectedBoard.description}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => handleDeleteBoard(selectedBoard.id)}
-              className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-            >
-              ✕
-            </button>
-          </div>
-
-          {selectedBoard.links.length > 0 ? (
-            <div className="space-y-1">
-              <p className="text-[11px] text-[#F2E8DC]/60">Links:</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedBoard.links.map((link) => (
-                  <span
-                    key={link}
-                    className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
-                  >
-                    <span className="truncate max-w-[140px] md:max-w-[180px]">
-                      {link}
-                    </span>
-                    <button
-                      onClick={() =>
-                        updateBoard(selectedBoard.id, (board) => ({
-                          ...board,
-                          links: board.links.filter((l) => l !== link),
-                        }))
-                      }
-                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-[11px] text-[#F2E8DC]/60">
-              No links yet in this board.
-            </p>
-          )}
-
-          {selectedBoard.docs.length > 0 ? (
-            <div className="space-y-1">
-              <p className="text-[11px] text-[#F2E8DC]/60">Docs:</p>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {selectedBoard.docs.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
-                  >
-                    <span className="truncate max-w-[140px] md:max-w-[180px]">
-                      {doc.name}
-                    </span>
-                    <button
-                      onClick={() =>
-                        updateBoard(selectedBoard.id, (board) => ({
-                          ...board,
-                          docs: board.docs.filter((d) => d.id !== doc.id),
-                        }))
-                      }
-                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-[11px] text-[#F2E8DC]/60">
-              No docs uploaded yet.
-            </p>
-          )}
-        </div>
-      );
-    };
-
-    const renderOtherBoards = () => {
+    const renderBoardsList = () => {
       if (boards.length === 0) {
         return (
           <p className="text-[11px] text-[#F2E8DC]/50">
-            Create a board on the right to get started.
+            Create your first board on the right to get started.
           </p>
         );
       }
-
-      if (otherBoards.length === 0) {
-        return (
-          <p className="text-[11px] text-[#F2E8DC]/50">No other boards yet.</p>
-        );
-      }
-
       return (
-        <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-          {otherBoards.map((board) => (
-            <button
-              key={board.id}
-              onClick={() => setSelectedBoardId(board.id)}
-              className="text-left rounded-2xl px-3 py-2 border border-[#7E84F2]/30 hover:border-[#7E84F2]/60 transition"
-            >
-              <p className="text-xs md:text-sm font-semibold text-[#F2E8DC]">
-                {board.title}
-              </p>
-              {board.description && (
-                <p className="text-[11px] text-[#F2E8DC]/60 truncate">
-                  {board.description}
-                </p>
-              )}
-            </button>
-          ))}
+        <div className="flex flex-col gap-2">
+          {boards.map((board) => {
+            const isSelected = selectedBoardIds.includes(board.id);
+            const isEditingThis = editingBoardId === board.id;
+            return (
+              <div
+                key={board.id}
+                className={`rounded-2xl border px-3 py-2 transition ${
+                  isSelected
+                    ? "border-[#F27979] bg-[#F27979]/10"
+                    : "border-[#7E84F2]/30 hover:border-[#7E84F2]/60"
+                }`}
+              >
+                {isEditingThis ? (
+                  <div className="space-y-2">
+                    <input
+                      autoFocus
+                      value={editingBoardTitle}
+                      onChange={(e) => setEditingBoardTitle(e.target.value)}
+                      placeholder="Board title"
+                      className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={handleCancelEditingBoardTitle}
+                        className="px-3 py-1 rounded-full text-[11px] border border-[#7E84F2]/40 text-[#F2E8DC]/70 hover:border-[#7E84F2]/80"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveEditingBoardTitle}
+                        className="px-3 py-1 rounded-full text-[11px] font-semibold bg-[#7E84F2] text-[#0D0D0D] hover:bg-[#959AF8]"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <div className="space-y-2 rounded-2xl border border-dashed border-[#7E84F2]/40 px-3 py-2 bg-[#0D0D0D]/30">
+                      <p className="text-[10px] text-[#F2E8DC]/60">
+                        Add or remove board-specific links
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          value={editingBoardLinkInput}
+                          onChange={(e) =>
+                            setEditingBoardLinkInput(e.target.value)
+                          }
+                          placeholder="https://example.com/video"
+                          className="flex-1 rounded-full px-3 py-1.5 text-[11px] bg-[#050505] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+                        />
+                        <button
+                          onClick={() => {
+                            if (editingBoardId) {
+                              const added = addLinkToBoard(
+                                board.id,
+                                editingBoardLinkInput
+                              );
+                              if (added) {
+                                setEditingBoardLinkInput("");
+                              }
+                            }
+                          }}
+                          className="rounded-full px-3 py-1.5 text-[11px] bg-[#7E84F2] text-[#0D0D0D] font-semibold hover:bg-[#959AF8]"
+                        >
+                          Add link
+                        </button>
+                      </div>
+                      {board.links.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {board.links.map((link) => (
+                            <span
+                              key={link}
+                              className="inline-flex items-center gap-1 rounded-full bg-[#050505] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[140px] truncate"
+                            >
+                              {getLinkDisplayLabel(link)}
+                              <button
+                                onClick={() =>
+                                  removeLinkFromBoard(board.id, link)
+                                }
+                                className="text-[#F2E8DC]/60 hover:text-[#F2E8DC]"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-[#F2E8DC]/50">
+                          No links yet in this board.
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2 rounded-2xl border border-dashed border-[#7E84F2]/40 px-3 py-2 bg-[#0D0D0D]/30">
+                      <p className="text-[10px] text-[#F2E8DC]/60">
+                        Attach or remove board-specific files
+                      </p>
+                      <input
+                        type="file"
+                        multiple
+                        accept=".txt,.md,.markdown,.csv"
+                        onChange={(e) => handleInlineBoardDocsUpload(e, board.id)}
+                        className="text-[10px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-0.5 file:text-[10px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
+                      />
+                      {board.docs.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {board.docs.map((doc) => (
+                            <span
+                              key={doc.id}
+                              className="inline-flex items-center gap-1 rounded-full bg-[#050505] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[140px] truncate"
+                            >
+                              {doc.name}
+                              <button
+                                onClick={() => removeDocFromBoard(board.id, doc.id)}
+                                className="text-[#F2E8DC]/60 hover:text-[#F2E8DC]"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-[#F2E8DC]/50">
+                          No files yet in this board.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => toggleBoardSelection(board.id)}
+                      className="text-left w-full"
+                    >
+                      <p className="text-xs md:text-sm font-semibold text-[#F2E8DC]">
+                        {board.title}
+                      </p>
+                      {board.description && (
+                        <p className="text-[11px] text-[#F2E8DC]/60 truncate">
+                          {board.description}
+                        </p>
+                      )}
+                      <div className="mt-1 space-y-1">
+                        {board.links.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {board.links.slice(0, 3).map((link) => (
+                              <span
+                                key={link}
+                                className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[120px] truncate"
+                              >
+                                {getLinkDisplayLabel(link)}
+                              </span>
+                            ))}
+                            {board.links.length > 3 && (
+                              <span className="text-[10px] text-[#F2E8DC]/60">
+                                +{board.links.length - 3} more link
+                                {board.links.length - 3 === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {board.docs.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {board.docs.slice(0, 3).map((doc) => (
+                              <span
+                                key={doc.id}
+                                className="inline-flex items-center gap-1 rounded-full bg-[#0D0D0D] border border-[#7E84F2]/30 px-2 py-0.5 text-[10px] text-[#F2E8DC]/70 max-w-[120px] truncate"
+                              >
+                                {doc.name}
+                              </span>
+                            ))}
+                            {board.docs.length > 3 && (
+                              <span className="text-[10px] text-[#F2E8DC]/60">
+                                +{board.docs.length - 3} more file
+                                {board.docs.length - 3 === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-[#F2E8DC]/40 mt-1">
+                        {isSelected ? "Selected" : "Tap to select"}
+                      </p>
+                    </button>
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        onClick={() => handleStartEditingBoardTitle(board)}
+                        className="text-[11px] text-[#F2E8DC]/70 hover:text-[#F2E8DC]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteBoard(board.id)}
+                        className="text-[11px] text-[#F27979] hover:text-[#F2A0A0]"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       );
     };
@@ -1726,11 +2043,11 @@ const poppyMotionRafRef = useRef<number | null>(null);
       <div
         className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
       >
-        {renderSelected()}
-
-        <div className="space-y-2 border-t border-[#7E84F2]/20 pt-3">
-          <p className="text-[11px] text-[#F2E8DC]/60">Other boards:</p>
-          {renderOtherBoards()}
+        <div className="space-y-2 border-[#7E84F2]/20">
+          <p className="text-[11px] text-[#F2E8DC]/60 uppercase tracking-wide">
+            Boards
+          </p>
+          {renderBoardsList()}
         </div>
 
         <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
@@ -1941,17 +2258,13 @@ const poppyMotionRafRef = useRef<number | null>(null);
     ? 1.03
     : 1;
   const audioScale =
-    isSpeaking && orbAudioLevels.bass > 0
-      ? 1 + orbAudioLevels.bass * 0.08
-      : 1;
+    isSpeaking && orbAudioLevels.bass > 0 ? 1 + orbAudioLevels.bass * 0.08 : 1;
   const innerOrbStyle = {
     transform: `scale(${baseOrbScale * audioScale})`,
     boxShadow: `0 0 ${40 + orbAudioLevels.mid * 90}px rgba(126,132,242,${
       0.3 + orbAudioLevels.mid * 0.65
     })`,
-    borderColor: `rgba(242,232,220,${
-      0.18 + orbAudioLevels.treble * 0.7
-    })`,
+    borderColor: `rgba(242,232,220,${0.18 + orbAudioLevels.treble * 0.7})`,
     filter: `saturate(${1 + orbAudioLevels.treble * 0.5})`,
   };
   const auraStyle = {
