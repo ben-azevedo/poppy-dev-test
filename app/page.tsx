@@ -1353,13 +1353,6 @@ const poppyMotionRafRef = useRef<number | null>(null);
             placeholder="Board name"
             className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
           />
-          {/* <textarea
-            value={boardDescriptionInput}
-            onChange={(e) => setBoardDescriptionInput(e.target.value)}
-            placeholder="Short description (optional)"
-            rows={3}
-            className="w-full rounded-2xl px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-          /> */}
 
           <div className="pt-1 space-y-2">
             <button
@@ -1850,22 +1843,6 @@ const poppyMotionRafRef = useRef<number | null>(null);
                     className={`w-4 h-4 object-contain invert opacity-80`}
                   />
                   <span>{" - Google Docs"}</span>
-                </button>
-              </div>
-              {/* MCP Google Docs Export button */}
-              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
-                <button
-                  onClick={handleExportGoogleDocViaMcp}
-                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
-                >
-                  <Image
-                    src="/icons/mcp.svg"
-                    alt="GoogleDocsMCP"
-                    width={16}
-                    height={16}
-                    className={`w-4 h-4 object-contain invert opacity-80`}
-                  />
-                  <span>{" - Google Docs (MCP)"}</span>
                 </button>
               </div>
               <span className="text-[10px] md:text-xs uppercase tracking-wide text-[#F2E8DC]/60">

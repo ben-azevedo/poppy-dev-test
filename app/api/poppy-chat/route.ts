@@ -8,6 +8,8 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 export const runtime = "nodejs";
 
+let lastExportDocUrl: string | null = null;
+
 const SYSTEM_PROMPT = `
 You are Poppy – a playful, friendly, slightly sassy *female* AI content coach.
 
@@ -111,6 +113,8 @@ async function exportToGoogleDocViaMcp(
       console.error("MCP tool call result missing docUrl:", result);
       throw new Error("MCP export did not return a doc URL");
     }
+
+    lastExportDocUrl = docUrl;
 
     return docUrl;
   } finally {
@@ -328,7 +332,7 @@ async function buildLinkSummaries(urls: string[]): Promise<LinkSummary[]> {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const messages = (body?.messages ?? []) as SimpleMessage[];
+    const incoming = (body?.messages ?? []) as SimpleMessage[];
 
     // ✅ default to Claude
     const provider = (body?.provider ?? "claude") as "openai" | "claude";
@@ -348,6 +352,14 @@ export async function POST(req: NextRequest) {
           )
           .slice(-5) // last few docs
       : [];
+
+    const messages = incoming.filter(
+      (m) =>
+        m &&
+        typeof m.content === "string" &&
+        m.content.trim().length > 0 &&
+        (m.role === "user" || m.role === "assistant")
+    );
 
     const safeMessages =
       messages.length > 0
@@ -451,21 +463,23 @@ If relevant, suggest they upload .txt/.md files with:
 You will then be able to mirror that language and structure more precisely.
 `;
 
-    let rawText: string;
-
     const toolsContext = `
 Tool available:
 - export_poppy_summary_to_google_doc:
   * Call this ONLY if the user clearly asks to export/save/send their plan, hooks, summary, or next steps to Google Docs.
   * When calling the tool, choose a descriptive title (use the project name or what they're exporting) and craft Markdown content that includes the relevant pieces (hooks, high-level goal, step-by-step plan, next 3 moves, etc.).
-  * The tool returns { "docUrl": "https://docs.google.com/..." }. After using it, tell the user you created a doc and include a clickable Markdown link like [Open it here](docUrl).
+  * The tool returns { "docUrl": "https://docs.google.com/..." }.
   * Do NOT call it unless they explicitly want a Google Doc export.
 `;
 
-    const fullSystem = SYSTEM_PROMPT + linksContext + docsContext + toolsContext;
+    const fullSystem =
+      SYSTEM_PROMPT + linksContext + docsContext + toolsContext;
+
+    // 🔁 Call the model (Claude or OpenAI) with tools enabled
+    let result: any;
 
     if (provider === "claude") {
-      const { text } = await generateText({
+      result = await generateText({
         model: anthropic("claude-sonnet-4-20250514"),
         system: fullSystem,
         messages: safeMessages.map((m) => ({
@@ -475,9 +489,8 @@ Tool available:
         tools: poppyTools,
         maxSteps: 3,
       });
-      rawText = text;
     } else {
-      const { text } = await generateText({
+      result = await generateText({
         model: openai("gpt-4.1-mini"),
         system: fullSystem,
         messages: safeMessages.map((m) => ({
@@ -487,17 +500,70 @@ Tool available:
         tools: poppyTools,
         maxSteps: 3,
       });
-      rawText = text;
     }
 
-    const replyText = rawText;
+    const { text, toolResults } = result;
+
+    let replyText: string = (text ?? "").trim();
+
+    console.log("🧪 generateText text:", JSON.stringify(text));
+    console.log(
+      "🧪 generateText toolResults:",
+      JSON.stringify(toolResults, null, 2)
+    );
+
+    // 🧠 If the model only called the export tool and never spoke,
+    // build a friendly reply using the tool result.
+    if (!replyText && Array.isArray(toolResults) && toolResults.length) {
+      const exportResult = toolResults.find(
+        (tr: any) => tr.toolName === "export_poppy_summary_to_google_doc"
+      );
+
+      let docUrl: string | undefined;
+
+      if (exportResult) {
+        const r = (exportResult as any).result;
+
+        // Handle both shapes:
+        // - result: "https://docs.google.com/..."
+        // - result: { docUrl: "https://docs.google.com/..." }
+        if (typeof r === "string") {
+          docUrl = r;
+        } else if (r && typeof r === "object" && typeof r.docUrl === "string") {
+          docUrl = r.docUrl;
+        }
+      }
+
+      // Backup: if for some reason toolResults didn't carry it,
+      // fall back to what MCP just returned.
+      if (!docUrl && typeof lastExportDocUrl === "string") {
+        docUrl = lastExportDocUrl;
+      }
+
+      if (docUrl) {
+        // ✅ SUCCESS CASE
+        replyText = `I exported to Google Doc and here is the link: ${docUrl}`;
+      } else {
+        // ❌ FAILURE CASE
+        replyText =
+          "Sorry, I can not export to Google Doc at this time. Please try the export links in the top right corner of the screen instead.";
+      }
+    }
+
+    // Final safety net: never send an empty reply
+    if (!replyText.trim()) {
+      replyText =
+        "I did some work behind the scenes but wasn’t sure what to say back. Tell me what you want next and I’ll help.";
+    }
+
     return Response.json({ reply: replyText });
+
   } catch (err) {
     console.error("poppy-chat error", err);
     return new Response(
       JSON.stringify({
         reply:
-          "Poppy: Oof, something glitched on my side. Try asking me again in a sec? 💖",
+          "Poppy: Oof, something glitched on my side. Try asking me again in a sec?",
       }),
       { status: 500 }
     );
