@@ -237,11 +237,14 @@ const poppyMotionRafRef = useRef<number | null>(null);
 
     const animate = (timestamp: number) => {
       const t = timestamp / 1000;
-      const audioPulse = orbAudioLevelsRef.current.mid;
-      const breathing = 0.95 + Math.sin(t * 1.7) * 0.03;
-      const shimmer = Math.sin(t * 3.1) * 0.01;
-      const scale = breathing + shimmer + audioPulse * 0.15;
-      const clampedScale = Math.min(Math.max(scale, 0.85), 1.2);
+      const levels = orbAudioLevelsRef.current;
+      const audioEnergy =
+        levels.bass * 0.4 + levels.mid * 0.45 + levels.treble * 0.25;
+      const breathing = 0.95 + Math.sin(t * 1.35) * 0.045;
+      const shimmer = Math.sin(t * 3.2) * 0.02;
+      const audioSwing = (audioEnergy - 0.35) * 1.1;
+      const responsiveScale = breathing + shimmer + audioSwing;
+      const clampedScale = Math.min(Math.max(responsiveScale, 0.78), 1.32);
       wrapper.style.transform = `translate(-50%, -50%) scale(${clampedScale})`;
       poppyMotionRafRef.current = window.requestAnimationFrame(animate);
     };
