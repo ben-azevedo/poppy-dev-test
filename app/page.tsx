@@ -99,8 +99,8 @@ type Board = {
 };
 
 const generateId = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? (crypto as Crypto).randomUUID()
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
 
 export default function Home() {
@@ -131,6 +131,8 @@ export default function Home() {
   const [boardTitleInput, setBoardTitleInput] = useState("");
   const [boardDescriptionInput, setBoardDescriptionInput] = useState("");
   const [boardLinkInput, setBoardLinkInput] = useState("");
+  const [boardFormLinks, setBoardFormLinks] = useState<string[]>([]);
+  const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
 
   // Refs to avoid stale state in callbacks
   const providerRef = useRef<Provider>("claude");
@@ -155,7 +157,7 @@ export default function Home() {
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const orbCanvasRafRef = useRef<number | null>(null);
   const poppyImageRef = useRef<HTMLDivElement | null>(null);
-  const poppyMotionRafRef = useRef<number | null>(null);
+const poppyMotionRafRef = useRef<number | null>(null);
 
   // Scroll container ref
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -224,7 +226,7 @@ export default function Home() {
     };
 
     const resetTransform = () => {
-      wrapper.style.transform = "translate(-50%, -50%) scale(0.95) rotate(0deg)";
+      wrapper.style.transform = "translate(-50%, -50%) scale(0.95)";
     };
 
     if (!isSpeaking) {
@@ -233,14 +235,14 @@ export default function Home() {
       return;
     }
 
-    const animate = () => {
-      const t = performance.now() / 1000;
-      const scale =
-        0.92 +
-        (Math.sin(t * 2.2) + 1) * 0.04 +
-        orbAudioLevelsRef.current.mid * 0.07;
-      const rotation = (t * 260 + orbAudioLevelsRef.current.bass * 80) % 360;
-      wrapper.style.transform = `translate(-50%, -50%) scale(${scale}) rotate(${rotation}deg)`;
+    const animate = (timestamp: number) => {
+      const t = timestamp / 1000;
+      const audioPulse = orbAudioLevelsRef.current.mid;
+      const breathing = 0.95 + Math.sin(t * 1.7) * 0.03;
+      const shimmer = Math.sin(t * 3.1) * 0.01;
+      const scale = breathing + shimmer + audioPulse * 0.15;
+      const clampedScale = Math.min(Math.max(scale, 0.85), 1.2);
+      wrapper.style.transform = `translate(-50%, -50%) scale(${clampedScale})`;
       poppyMotionRafRef.current = window.requestAnimationFrame(animate);
     };
 
@@ -1133,13 +1135,13 @@ export default function Home() {
   };
 
   const handleDeleteBoard = (boardId: string) => {
-    setBoards((prev) => prev.filter((b) => b.id !== boardId));
-    if (selectedBoardId === boardId) {
-      setSelectedBoardId((prev) => {
-        const remaining = boards.filter((b) => b.id !== boardId);
-        return remaining[0]?.id ?? null;
-      });
-    }
+    setBoards((prev) => {
+      const next = prev.filter((b) => b.id !== boardId);
+      setSelectedBoardId((current) =>
+        current === boardId ? next[0]?.id ?? null : current
+      );
+      return next;
+    });
   };
 
   const handleBoardLinkAdd = () => {
@@ -1208,232 +1210,215 @@ export default function Home() {
   };
 
   // 🔧 Reusable side link panel
-  const LinkPanel = ({ className = "" }: { className?: string }) => (
-    <div
-      className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
-    >
-      <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-        Paste links to your best-performing{" "}
-        <strong>ads, sales pages, or videos</strong> (YouTube / Instagram /
-        TikTok / etc.).
-        <br />
-        <br />
-        Poppy will study them as your{" "}
-        <span className="text-[#F27979] font-semibold">
-          source content brain
-        </span>{" "}
-        so she can mirror the structure and vibe in new hooks, scripts, and
-        copy.
-      </p>
+  const LinkPanel = ({ className = "" }: { className?: string }) => {
+    const canCreateBoard =
+      boardTitleInput.trim().length > 0 &&
+      (boardFormLinks.length > 0 || boardFormDocs.length > 0);
 
-      {/* Links input */}
-      <div className="flex flex-col gap-2">
-        <input
-          value={linkInput}
-          onChange={(e) => setLinkInput(e.target.value)}
-          placeholder="https://youtube.com/watch?... or https://www.instagram.com/..."
-          className="rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-        />
-        <button
-          onClick={() => {
-            const trimmed = linkInput.trim();
-            if (!trimmed) return;
-
-            try {
-              const url = new URL(
-                trimmed.startsWith("http") ? trimmed : `https://${trimmed}`
-              );
-              const asString = url.toString();
-              if (!contentLinksRef.current.includes(asString)) {
-                const newLinks = [...contentLinksRef.current, asString];
-                setContentLinks(newLinks);
-              }
-              setLinkInput("");
-            } catch {
-              alert("That doesn't look like a valid URL. Try again?");
-            }
-          }}
-          className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition self-start"
-        >
-          Add link
-        </button>
-      </div>
-
-      {contentLinks.length > 0 && (
-        <div className="mt-1 max-h-32 md:max-h-40 overflow-y-auto">
-          <p className="text-[11px] text-[#F2E8DC]/60 mb-1">
-            Your content sources:
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {contentLinks.map((link) => (
-              <span
-                key={link}
-                className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
-              >
-                <span className="truncate max-w-[140px] md:max-w-[180px]">
-                  {link}
-                </span>
-                <button
-                  onClick={() => {
-                    const newLinks = contentLinksRef.current.filter(
-                      (l) => l !== link
-                    );
-                    setContentLinks(newLinks);
-                  }}
-                  className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Text docs upload */}
-      <div className="pt-2 border-t border-[#7E84F2]/20 space-y-2">
+    return (
+      <div
+        className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
+      >
         <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-          Or drop in <strong>.txt / .md</strong> docs with{" "}
-          <strong>pain points, ICP, email copy</strong>, etc. I’ll read them as
-          part of your content brain.
+          Paste links to your best-performing{" "}
+          <strong>ads, sales pages, or videos</strong> (YouTube / Instagram /
+          TikTok / etc.).
+          <br />
+          <br />
+          Poppy will study them as your{" "}
+          <span className="text-[#F27979] font-semibold">
+            source content brain
+          </span>{" "}
+          so she can mirror the structure and vibe in new hooks, scripts, and
+          copy.
         </p>
 
-        <input
-          type="file"
-          multiple
-          accept=".txt,.md,.markdown,.csv"
-          onChange={handleFileUpload}
-          className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
-        />
+        {/* Global links input */}
+        <div className="flex flex-col gap-2">
+          <input
+            value={linkInput}
+            onChange={(e) => setLinkInput(e.target.value)}
+            placeholder="https://youtube.com/watch?... or https://www.instagram.com/..."
+            className="rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+          />
+          <button
+            onClick={() => {
+              const trimmed = linkInput.trim();
+              if (!trimmed) return;
 
-        {contentDocs.length > 0 && (
-          <div className="max-h-32 md:max-h-40 overflow-y-auto space-y-1">
-            <p className="text-[11px] text-[#F2E8DC]/60 mb-1">Text docs:</p>
-            {contentDocs.map((doc, idx) => (
-              <div
-                key={`${doc.name}-${idx}`}
-                className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
-              >
-                <span className="truncate max-w-[140px] md:max-w-[180px]">
-                  {doc.name}
-                </span>
-                <button
-                  onClick={() => {
-                    setContentDocs((prev) => prev.filter((_, i) => i !== idx));
-                  }}
-                  className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+              try {
+                const url = new URL(
+                  trimmed.startsWith("http") ? trimmed : `https://${trimmed}`
+                );
+                const asString = url.toString();
+                if (!contentLinksRef.current.includes(asString)) {
+                  const newLinks = [...contentLinksRef.current, asString];
+                  setContentLinks(newLinks);
+                }
+                setLinkInput("");
+              } catch {
+                alert("That doesn't look like a valid URL. Try again?");
+              }
+            }}
+            className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition self-start"
+          >
+            Add link
+          </button>
+        </div>
+
+        {contentLinks.length > 0 && (
+          <div className="mt-1 max-h-32 md:max-h-40 overflow-y-auto">
+            <p className="text-[11px] text-[#F2E8DC]/60 mb-1">
+              Your content sources:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {contentLinks.map((link) => (
+                <span
+                  key={link}
+                  className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
                 >
-                  ✕
-                </button>
-              </div>
-            ))}
+                  <span className="truncate max-w-[140px] md:max-w-[180px]">
+                    {link}
+                  </span>
+                  <button
+                    onClick={() => {
+                      const newLinks = contentLinksRef.current.filter(
+                        (l) => l !== link
+                      );
+                      setContentLinks(newLinks);
+                    }}
+                    className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
         )}
-      </div>
-    </div>
-  );
 
-  const BoardPanel = ({ className = "" }: { className?: string }) => (
-    <div
-      className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
-    >
-      <div>
-        <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-          Build <strong>Boards</strong> — collections of links + files about one
-          concept (e.g. “Holiday Ads”, “Landing Pages”, “Email Swipe”). I’ll keep
-          them ready to reference next time.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <input
-          value={boardTitleInput}
-          onChange={(e) => setBoardTitleInput(e.target.value)}
-          placeholder="Board name"
-          className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-        />
-        <textarea
-          value={boardDescriptionInput}
-          onChange={(e) => setBoardDescriptionInput(e.target.value)}
-          placeholder="Short description (optional)"
-          rows={3}
-          className="w-full rounded-2xl px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-        />
-        <button
-          onClick={handleCreateBoard}
-          className="rounded-full px-4 py-2 bg-[#F27979] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#f59797] transition"
-        >
-          Create board
-        </button>
-      </div>
-
-      {boards.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-[11px] text-[#F2E8DC]/60">Your boards:</p>
-          <div className="flex flex-col gap-2">
-            {boards.map((board) => (
-              <div
-                key={board.id}
-                className={`rounded-2xl px-3 py-2 border flex items-start justify-between gap-2 ${
-                  board.id === selectedBoardId
-                    ? "border-[#7E84F2] bg-[#7E84F2]/20"
-                    : "border-[#7E84F2]/30 bg-transparent"
-                }`}
-              >
-                <button
-                  onClick={() => setSelectedBoardId(board.id)}
-                  className="text-left flex-1"
-                >
-                  <p className="text-xs md:text-sm font-semibold text-[#F2E8DC]">
-                    {board.title}
-                  </p>
-                  {board.description && (
-                    <p className="text-[11px] text-[#F2E8DC]/60">
-                      {board.description}
-                    </p>
-                  )}
-                </button>
-                <button
-                  onClick={() => handleDeleteBoard(board.id)}
-                  className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <p className="text-[11px] text-[#F2E8DC]/60">
-          No boards yet — add one above to start organizing references.
-        </p>
-      )}
-
-      {selectedBoard && (
-        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
+        {/* Global text docs upload */}
+        <div className="pt-2 border-t border-[#7E84F2]/20 space-y-2">
           <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-            <span className="font-semibold">{selectedBoard.title}</span>{" "}
-            {selectedBoard.description
-              ? `• ${selectedBoard.description}`
-              : ""}
+            Or drop in <strong>.txt / .md</strong> docs with{" "}
+            <strong>pain points, ICP, email copy</strong>, etc. I’ll read them
+            as part of your content brain.
           </p>
 
-          <div className="space-y-2">
-            <input
-              value={boardLinkInput}
-              onChange={(e) => setBoardLinkInput(e.target.value)}
-              placeholder="https:// link for this board"
-              className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-            />
+          <input
+            type="file"
+            multiple
+            accept=".txt,.md,.markdown,.csv"
+            onChange={handleFileUpload}
+            className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
+          />
+
+          {contentDocs.length > 0 && (
+            <div className="max-h-32 md:max-h-40 overflow-y-auto space-y-1">
+              <p className="text-[11px] text-[#F2E8DC]/60 mb-1">Text docs:</p>
+              {contentDocs.map((doc, idx) => (
+                <div
+                  key={`${doc.name}-${idx}`}
+                  className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
+                >
+                  <span className="truncate max-w-[140px] md:max-w-[180px]">
+                    {doc.name}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setContentDocs((prev) =>
+                        prev.filter((_, i) => i !== idx)
+                      );
+                    }}
+                    className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Board builder */}
+        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
+          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
+            Build <strong>Boards</strong> from these assets (name + description
+            + board-specific links/files), then save them for quick recall
+            later.
+          </p>
+          <input
+            value={boardTitleInput}
+            onChange={(e) => setBoardTitleInput(e.target.value)}
+            placeholder="Board name"
+            className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+          />
+          {/* <textarea
+            value={boardDescriptionInput}
+            onChange={(e) => setBoardDescriptionInput(e.target.value)}
+            placeholder="Short description (optional)"
+            rows={3}
+            className="w-full rounded-2xl px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
+          /> */}
+
+          <div className="pt-1 space-y-2">
             <button
-              onClick={handleBoardLinkAdd}
-              className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition self-start"
+              onClick={handleCreateBoard}
+              disabled={!canCreateBoard}
+              className={`w-full rounded-full px-4 py-2 text-xs md:text-sm font-semibold transition ${
+                canCreateBoard
+                  ? "bg-[#F27979] text-[#0D0D0D] hover:bg-[#f59797]"
+                  : "bg-[#5f5b73] text-[#aaa] cursor-not-allowed"
+              }`}
             >
-              Add link to board
+              Create board
+            </button>
+            <p className="text-xs md:text-sm text-[#F2E8DC]/70">
+              <strong>
+                To create a board, enter a name and add at least one
+                board-specific link or file.
+              </strong>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const BoardDisplayPanel = ({ className = "" }: { className?: string }) => {
+    const otherBoards = boards.filter((b) => b.id !== selectedBoardId);
+
+    const renderSelected = () => {
+      if (!selectedBoard) {
+        return (
+          <p className="text-xs md:text-sm text-[#F2E8DC]/70">
+            <strong>Select your board(s).</strong>
+          </p>
+        );
+      }
+
+      return (
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm md:text-base font-semibold text-[#F2E8DC]">
+                {selectedBoard.title}
+              </p>
+              {selectedBoard.description && (
+                <p className="text-xs md:text-sm text-[#F2E8DC]/70">
+                  {selectedBoard.description}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => handleDeleteBoard(selectedBoard.id)}
+              className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
+            >
+              ✕
             </button>
           </div>
 
-          {selectedBoard.links.length > 0 && (
+          {selectedBoard.links.length > 0 ? (
             <div className="space-y-1">
               <p className="text-[11px] text-[#F2E8DC]/60">Links:</p>
               <div className="flex flex-wrap gap-2">
@@ -1460,22 +1445,16 @@ export default function Home() {
                 ))}
               </div>
             </div>
+          ) : (
+            <p className="text-[11px] text-[#F2E8DC]/60">
+              No links yet in this board.
+            </p>
           )}
 
-          <div className="space-y-2">
-            <p className="text-[11px] text-[#F2E8DC]/60">Upload docs:</p>
-            <input
-              type="file"
-              multiple
-              accept=".txt,.md,.markdown,.csv"
-              onChange={handleBoardDocsUpload}
-              className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
-            />
-            {selectedBoard.docs.length > 0 && (
-              <div className="max-h-32 md:max-h-40 overflow-y-auto space-y-1">
-                <p className="text-[11px] text-[#F2E8DC]/60 mb-1">
-                  Docs in this board:
-                </p>
+          {selectedBoard.docs.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-[11px] text-[#F2E8DC]/60">Docs:</p>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
                 {selectedBoard.docs.map((doc) => (
                   <div
                     key={doc.id}
@@ -1498,13 +1477,66 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-[#F2E8DC]/60">
+              No docs uploaded yet.
+            </p>
+          )}
         </div>
-      )}
-    </div>
-  );
+      );
+    };
 
+    const renderOtherBoards = () => {
+      if (boards.length === 0) {
+        return (
+          <p className="text-[11px] text-[#F2E8DC]/50">
+            Create a board on the right to get started.
+          </p>
+        );
+      }
+
+      if (otherBoards.length === 0) {
+        return (
+          <p className="text-[11px] text-[#F2E8DC]/50">No other boards yet.</p>
+        );
+      }
+
+      return (
+        <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+          {otherBoards.map((board) => (
+            <button
+              key={board.id}
+              onClick={() => setSelectedBoardId(board.id)}
+              className="text-left rounded-2xl px-3 py-2 border border-[#7E84F2]/30 hover:border-[#7E84F2]/60 transition"
+            >
+              <p className="text-xs md:text-sm font-semibold text-[#F2E8DC]">
+                {board.title}
+              </p>
+              {board.description && (
+                <p className="text-[11px] text-[#F2E8DC]/60 truncate">
+                  {board.description}
+                </p>
+              )}
+            </button>
+          ))}
+        </div>
+      );
+    };
+
+    return (
+      <div
+        className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
+      >
+        {renderSelected()}
+
+        <div className="space-y-2 border-t border-[#7E84F2]/20 pt-3">
+          <p className="text-[11px] text-[#F2E8DC]/60">Other boards:</p>
+          {renderOtherBoards()}
+        </div>
+      </div>
+    );
+  };
   // Handle exporting
   const buildLocalSummary = (): string => {
     const msgs = messagesRef.current;
@@ -1820,8 +1852,8 @@ export default function Home() {
                   <span>{" - Google Docs"}</span>
                 </button>
               </div>
+              {/* MCP Google Docs Export button */}
               <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
-                {/* MCP Google Docs Export button */}
                 <button
                   onClick={handleExportGoogleDocViaMcp}
                   className="px-3 py-1 rounded-full transition flex items-center gap-1"
@@ -1930,7 +1962,10 @@ export default function Home() {
                   style={{
                     opacity: orbState === "speaking" ? 1 : 0.1,
                     filter: orbState === "speaking" ? "none" : "grayscale(1)",
-                    transform: "translate(-50%, -50%) scale(0.95) rotate(0deg)",
+                    transform:
+                      orbState === "speaking"
+                        ? undefined
+                        : "translate(-50%, -50%) scale(0.95)",
                   }}
                 >
                   <Image
@@ -2060,19 +2095,10 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Desktop board panel on the left */}
-          <div className="hidden md:block absolute left-4 top-28 w-80">
-            <BoardPanel />
+          <div className="w-full max-w-2xl mt-4 md:mt-0 md:absolute md:left-4 md:top-28 md:w-80">
+            <BoardDisplayPanel />
           </div>
-
-          {/* Desktop side panel on the right */}
-          <div className="hidden md:block absolute right-4 top-28 w-80">
-            <LinkPanel />
-          </div>
-
-          {/* Mobile: panels below the chat */}
-          <div className="md:hidden w-full max-w-2xl mt-4 space-y-4">
-            <BoardPanel />
+          <div className="w-full max-w-2xl mt-4 md:mt-0 md:absolute md:right-4 md:top-28 md:w-80">
             <LinkPanel />
           </div>
         </>

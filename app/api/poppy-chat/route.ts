@@ -1,7 +1,12 @@
 import { NextRequest } from "next/server";
-import { generateText } from "ai";
+import { generateText, jsonSchema } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+
+export const runtime = "nodejs";
 
 const SYSTEM_PROMPT = `
 You are Poppy – a playful, friendly, slightly sassy *female* AI content coach.
@@ -43,6 +48,115 @@ type LinkSummary = {
 type ContentDoc = {
   name: string;
   text: string;
+};
+
+async function exportToGoogleDocViaMcp(
+  title: string | undefined,
+  content: string
+): Promise<string> {
+  console.log("🛠️ exportToGoogleDocViaMcp called with title:", title);
+  console.log("📝 content preview:", content.slice(0, 200));
+
+  const safeTitle =
+    typeof title === "string" && title.trim().length > 0
+      ? title.trim()
+      : "Poppy Export";
+
+  const transport = new StdioClientTransport({
+    command: "npx",
+    args: ["tsx", "mcp-server.ts"],
+    env: process.env,
+  });
+
+  const client = new Client({
+    name: "poppy-chat-api",
+    version: "1.0.0",
+  });
+
+  try {
+    await client.connect(transport);
+    const result = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "export_poppy_summary_to_google_doc",
+          arguments: {
+            title: safeTitle,
+            content,
+          },
+        },
+      },
+      CallToolResultSchema
+    );
+
+    let docUrl: string | undefined;
+    const structured: any = (result as any).structuredContent;
+    if (structured && typeof structured.docUrl === "string") {
+      docUrl = structured.docUrl;
+    } else if (Array.isArray(result.content)) {
+      for (const item of result.content) {
+        if (item?.type === "text" && typeof item.text === "string") {
+          const match = item.text.match(
+            /https:\/\/docs\.google\.com\/document\/d\/[^\s]+/i
+          );
+          if (match) {
+            docUrl = match[0];
+            break;
+          }
+        }
+      }
+    }
+
+    if (!docUrl) {
+      console.error("MCP tool call result missing docUrl:", result);
+      throw new Error("MCP export did not return a doc URL");
+    }
+
+    return docUrl;
+  } finally {
+    try {
+      await client.close();
+    } catch {}
+    try {
+      await transport.close();
+    } catch {}
+  }
+}
+
+const poppyTools = {
+  export_poppy_summary_to_google_doc: {
+    description:
+      "Creates a Google Doc via MCP when the user asks to export/save/send their summary, plan, hooks, or next steps.",
+    inputSchema: jsonSchema<{
+      title?: string;
+      content: string;
+    }>({
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Optional Google Doc title to use for the export.",
+        },
+        content: {
+          type: "string",
+          description:
+            "Markdown content to send to Google Docs (include hooks, plan, next steps, etc.).",
+        },
+      },
+      required: ["content"],
+    }),
+    execute: async ({ title, content }: { title?: string; content: string }) => {
+      console.log("🧰 Tool called: export_poppy_summary_to_google_doc", {
+        title,
+        contentPreview: content.slice(0, 200),
+      });
+      if (typeof content !== "string" || !content.trim()) {
+        throw new Error("content is required to export a Google Doc");
+      }
+      const docUrl = await exportToGoogleDocViaMcp(title, content);
+      return { docUrl };
+    },
+  },
 };
 
 // --- Helpers for YouTube transcript fetching ---
@@ -339,7 +453,16 @@ You will then be able to mirror that language and structure more precisely.
 
     let rawText: string;
 
-    const fullSystem = SYSTEM_PROMPT + linksContext + docsContext;
+    const toolsContext = `
+Tool available:
+- export_poppy_summary_to_google_doc:
+  * Call this ONLY if the user clearly asks to export/save/send their plan, hooks, summary, or next steps to Google Docs.
+  * When calling the tool, choose a descriptive title (use the project name or what they're exporting) and craft Markdown content that includes the relevant pieces (hooks, high-level goal, step-by-step plan, next 3 moves, etc.).
+  * The tool returns { "docUrl": "https://docs.google.com/..." }. After using it, tell the user you created a doc and include a clickable Markdown link like [Open it here](docUrl).
+  * Do NOT call it unless they explicitly want a Google Doc export.
+`;
+
+    const fullSystem = SYSTEM_PROMPT + linksContext + docsContext + toolsContext;
 
     if (provider === "claude") {
       const { text } = await generateText({
@@ -349,6 +472,8 @@ You will then be able to mirror that language and structure more precisely.
           role: m.role,
           content: m.content,
         })),
+        tools: poppyTools,
+        maxSteps: 3,
       });
       rawText = text;
     } else {
@@ -359,6 +484,8 @@ You will then be able to mirror that language and structure more precisely.
           role: m.role,
           content: m.content,
         })),
+        tools: poppyTools,
+        maxSteps: 3,
       });
       rawText = text;
     }
