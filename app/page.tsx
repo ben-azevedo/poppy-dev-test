@@ -1015,6 +1015,21 @@ const poppyMotionRafRef = useRef<number | null>(null);
     }
   };
 
+  const stopSpeakingAndRevealText = () => {
+    if (typingControllerRef.current) {
+      typingControllerRef.current.cancel();
+      return;
+    }
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+      } catch {}
+      audioRef.current = null;
+    }
+    stopVisualizer();
+    setIsSpeaking(false);
+  };
+
   const handleStartExperience = () => {
     setShowOrb(true);
 
@@ -1027,6 +1042,11 @@ const poppyMotionRafRef = useRef<number | null>(null);
 
   // Orb = mic button now
   const handleToggleListening = () => {
+    if (isSpeaking && !isListening) {
+      stopSpeakingAndRevealText();
+      return;
+    }
+
     if (!recognitionRef.current) {
       alert(
         "Your browser doesn’t support voice input. Try Chrome for the full experience."
