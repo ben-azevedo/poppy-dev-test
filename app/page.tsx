@@ -2,12 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import TopControls from "./component/TopControls";
 import PoppyHero from "./component/PoppyHero";
 import ChatTranscript from "./component/ChatTranscript";
 import BoardsPanel from "./component/Sidebars/BoardsPanel";
+import BoardFormPanel from "./component/Sidebars/BoardFormPanel";
 
 const isEmojiChar = (char: string): boolean => {
   if (!char) return false;
@@ -91,6 +90,11 @@ type BoardDoc = {
   text: string;
 };
 
+type BoardDocInput = {
+  name: string;
+  text: string;
+};
+
 type Board = {
   id: string;
   title: string;
@@ -140,11 +144,6 @@ export default function Home() {
   const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
     null
   );
-  const [boardTitleInput, setBoardTitleInput] = useState("");
-  const [boardDescriptionInput, setBoardDescriptionInput] = useState("");
-  const [boardLinkInput, setBoardLinkInput] = useState("");
-  const [boardFormLinks, setBoardFormLinks] = useState<string[]>([]);
-  const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
   const [linkTitleMap, setLinkTitleMap] = useState<Record<string, string>>({});
 
   // Refs to avoid stale state in callbacks
@@ -1227,6 +1226,9 @@ export default function Home() {
     .map((id) => boards.find((b) => b.id === id) || null)
     .filter((b): b is Board => b !== null);
   const selectedBoard = selectedBoards[0] ?? null;
+  const canSaveCurrentBoard =
+    selectedBoards.length > 0 &&
+    (contentLinks.length > 0 || contentDocs.length > 0);
 
   const updateBoard = (boardId: string, updater: (board: Board) => Board) => {
     setBoards((prev) =>
@@ -1334,27 +1336,68 @@ export default function Home() {
   const getLinkDisplayLabel = (url: string) =>
     linkTitleMap[url] || fallbackTitleFromUrl(url);
 
-  const handleCreateBoard = () => {
-    const title = boardTitleInput.trim();
-    const description = boardDescriptionInput.trim();
-    if (!title) {
+  const handleBoardFormDocsUpload = async (
+    files: FileList | null
+  ): Promise<BoardDocInput[]> => {
+    if (!files || files.length === 0) return [];
+
+    const uploads: BoardDocInput[] = [];
+    await Promise.all(
+      Array.from(files).map(
+        (file) =>
+          new Promise<void>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const text = String(reader.result ?? "");
+              if (text.trim()) {
+                uploads.push({
+                  name: file.name,
+                  text,
+                });
+              }
+              resolve();
+            };
+            reader.readAsText(file);
+          })
+      )
+    );
+
+    return uploads;
+  };
+
+  const handleCreateBoard = ({
+    title,
+    description,
+    links,
+    docs,
+  }: {
+    title: string;
+    description: string;
+    links: string[];
+    docs: BoardDocInput[];
+  }) => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
       alert("Give your board a name before saving it.");
+      return;
+    }
+    if (!links.length && !docs.length) {
+      alert("Add at least one link or file before creating a board.");
       return;
     }
     const newBoard: Board = {
       id: generateId(),
-      title,
-      description,
-      links: [...boardFormLinks],
-      docs: boardFormDocs.map((doc) => ({ ...doc })),
+      title: trimmedTitle,
+      description: description.trim(),
+      links: [...links],
+      docs: docs.map((doc) => ({
+        id: generateId(),
+        name: doc.name,
+        text: doc.text,
+      })),
     };
     setBoards((prev) => [newBoard, ...prev]);
     setSelectedBoardIds((prev) => [newBoard.id, ...prev.filter((id) => id !== newBoard.id)]);
-    setBoardTitleInput("");
-    setBoardDescriptionInput("");
-    setBoardLinkInput("");
-    setBoardFormLinks([]);
-    setBoardFormDocs([]);
   };
 
   const handleDeleteBoard = (boardId: string) => {
@@ -1367,67 +1410,6 @@ export default function Home() {
       });
       return next;
     });
-  };
-
-  const handleAddBoardFormLink = () => {
-    const trimmed = boardLinkInput.trim();
-    if (!trimmed) return;
-    try {
-      const url = new URL(
-        trimmed.startsWith("http") ? trimmed : `https://${trimmed}`
-      );
-      const asString = url.toString();
-      setBoardFormLinks((prev) =>
-        prev.includes(asString) ? prev : [...prev, asString]
-      );
-      setBoardLinkInput("");
-    } catch {
-      alert("That doesn't look like a valid URL. Try again?");
-    }
-  };
-
-  const handleRemoveBoardFormLink = (link: string) => {
-    setBoardFormLinks((prev) => prev.filter((l) => l !== link));
-  };
-
-  const handleBoardFormDocsUpload = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = e.target.files as FileList | null;
-    if (!files || files.length === 0) return;
-
-    const uploads: BoardDoc[] = [];
-    const readers: Promise<void>[] = [];
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      const p = new Promise<void>((resolve) => {
-        reader.onload = () => {
-          const text = String(reader.result ?? "");
-          if (text.trim()) {
-            uploads.push({
-              id: generateId(),
-              name: file.name,
-              text,
-            });
-          }
-          resolve();
-        };
-      });
-      readers.push(p);
-      reader.readAsText(file);
-    });
-
-    Promise.all(readers).then(() => {
-      if (uploads.length) {
-        setBoardFormDocs((prev) => [...prev, ...uploads]);
-      }
-    });
-
-    e.target.value = "";
-  };
-
-  const handleRemoveBoardFormDoc = (docId: string) => {
-    setBoardFormDocs((prev) => prev.filter((doc) => doc.id !== docId));
   };
 
   const handleSaveCurrentChat = () => {
@@ -1448,8 +1430,6 @@ export default function Home() {
     };
     setSavedChats((prev) => [newChat, ...prev]);
     setSelectedSavedChatId(newChat.id);
-    setEditingChatId(null);
-    setEditingChatTitle("");
   };
 
   const handleSelectSavedChat = (chatId: string) => {
@@ -1491,151 +1471,6 @@ export default function Home() {
   const handleRenameSavedChat = (chatId: string, title: string) => {
     setSavedChats((prev) =>
       prev.map((chat) => (chat.id === chatId ? { ...chat, title } : chat))
-    );
-  };
-
-  // 🔧 Reusable side link panel
-  const LinkPanel = ({ className = "" }: { className?: string }) => {
-    const canCreateBoard =
-      boardTitleInput.trim().length > 0 &&
-      (boardFormLinks.length > 0 || boardFormDocs.length > 0);
-    const canSaveCurrentBoard =
-      selectedBoards.length > 0 &&
-      (contentLinks.length > 0 || contentDocs.length > 0);
-
-    return (
-      <div
-        className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
-      >
-        {/* Board Creator - right column */}
-        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
-          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-            Build <strong>Boards</strong> from these assets (name, description,
-            board-specific links/files), then save them for quick recall later.
-          </p>
-
-          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-            Poppy will study them as your{" "}
-            <span className="text-[#F27979] font-semibold">
-              source content brain
-            </span>{" "}
-            so she can mirror the structure and vibe in new hooks, scripts, and
-            copy.
-          </p>
-
-          <input
-            value={boardTitleInput}
-            onChange={(e) => setBoardTitleInput(e.target.value)}
-            placeholder="Board title"
-            className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-          />
-
-          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-            Paste links to your best-performing{" "}
-            <strong>ads, sales pages, or videos</strong> (YouTube / Instagram /
-            TikTok / etc.).
-            <br />
-          </p>
-
-          {/* Add Links */}
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                value={boardLinkInput}
-                onChange={(e) => setBoardLinkInput(e.target.value)}
-                placeholder="Link only for this board"
-                className="flex-1 rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-              />
-              <button
-                onClick={handleAddBoardFormLink}
-                className="rounded-full px-4 py-2 bg-[#7E84F2] text-[#0D0D0D] text-xs md:text-sm font-semibold hover:bg-[#959AF8] transition"
-              >
-                Add link
-              </button>
-            </div>
-
-            {boardFormLinks.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {boardFormLinks.map((link) => (
-                  <span
-                    key={link}
-                    className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80 max-w-full"
-                  >
-                    <span className="truncate max-w-[140px] md:max-w-[180px]">
-                    {getLinkDisplayLabel(link)}
-                    </span>
-                    <button
-                      onClick={() => handleRemoveBoardFormLink(link)}
-                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-            Or drop in <strong>.txt / .md</strong> docs with{" "}
-            <strong>pain points, ICP, email copy</strong>, etc. I’ll read them
-            as part of your content brain.
-          </p>
-
-          {/* Add Files */}
-          <div className="space-y-2">
-            <input
-              type="file"
-              multiple
-              accept=".txt,.md,.markdown,.csv"
-              onChange={handleBoardFormDocsUpload}
-              className="text-[11px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
-            />
-            {boardFormDocs.length > 0 && (
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {boardFormDocs.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="flex items-center justify-between gap-2 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-3 py-1 text-[11px] text-[#F2E8DC]/80"
-                  >
-                    <span className="truncate max-w-[140px] md:max-w-[180px]">
-                      {doc.name}
-                    </span>
-                    <button
-                      onClick={() => handleRemoveBoardFormDoc(doc.id)}
-                      className="text-[#F2E8DC]/50 hover:text-[#F2E8DC]"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <p className="text-xs md:text-sm text-[#F2E8DC]/70">
-            <strong>
-              To create a board, enter a board title and add at least one
-              board-specific link or file.
-            </strong>
-          </p>
-
-          {/* Create a Board */}
-          <div className="pt-1 space-y-2">
-            <button
-              onClick={handleCreateBoard}
-              disabled={!canCreateBoard}
-              className={`w-full rounded-full px-4 py-2 text-xs md:text-sm font-semibold transition ${
-                canCreateBoard
-                  ? "bg-[#F27979] text-[#0D0D0D] hover:bg-[#f59797]"
-                  : "bg-[#5f5b73] text-[#aaa] cursor-not-allowed"
-              }`}
-            >
-              Create board
-            </button>
-          </div>
-        </div>
-      </div>
     );
   };
 
@@ -1995,7 +1830,16 @@ export default function Home() {
             />
           </div>
           <div className="w-full max-w-2xl mt-4 md:mt-0 md:absolute md:right-4 md:top-28 md:w-80">
-            <LinkPanel />
+            <BoardFormPanel
+              onCreateBoard={handleCreateBoard}
+              onAttachDocs={handleBoardFormDocsUpload}
+              onSaveSelectedBoard={handleSaveSelectedBoard}
+              getLinkDisplayLabel={getLinkDisplayLabel}
+              contentLinks={contentLinks}
+              contentDocs={contentDocs}
+              selectedBoards={selectedBoards}
+              canSaveCurrentBoard={canSaveCurrentBoard}
+            />
           </div>
         </>
       )}
