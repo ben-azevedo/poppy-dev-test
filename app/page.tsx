@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import TopControls from "./component/TopControls";
+import PoppyHero from "./component/PoppyHero";
 
 const isEmojiChar = (char: string): boolean => {
   if (!char) return false;
@@ -118,8 +120,8 @@ export default function Home() {
   // ElevenLabs Voice
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // ✅ Claude is default brain
-  const [provider, setProvider] = useState<Provider>("claude");
+  // ✅ OpenAI is default brain
+  const [provider, setProvider] = useState<Provider>("openai");
 
   // Voice mute
   const [isMuted, setIsMuted] = useState(false);
@@ -150,7 +152,7 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
   const [linkTitleMap, setLinkTitleMap] = useState<Record<string, string>>({});
 
   // Refs to avoid stale state in callbacks
-  const providerRef = useRef<Provider>("claude");
+  const providerRef = useRef<Provider>("openai");
   const messagesRef = useRef<Message[]>([]);
   const contentLinksRef = useRef<string[]>([]);
   const contentDocsRef = useRef<ContentDoc[]>([]);
@@ -2288,136 +2290,19 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
     >
       {/* 🧠 Brain toggle + Mute in top-right */}
       {showOrb && (
-        <>
-          <div className="absolute top-4 left-4 flex items-center gap-3 z-20">
-            {/* Mute toggle */}
-            {/* <button
-              onClick={handleToggleMute}
-              className={`rounded-full px-3 py-1 text-xs md:text-sm border transition flex items-center gap-1 ${
-                isMuted
-                  ? "bg-[#150140] border-[#7E84F2]/70 text-[#F2E8DC]"
-                  : "bg-transparent border-[#7E84F2]/40 text-[#F2E8DC]/70"
-              }`}
-            >
-              <span>{isMuted ? "🔇" : "🔊"}</span>
-              <span className="hidden md:inline">
-                {isMuted ? "Muted" : "Voice on"}
-              </span>
-            </button> */}
-
-            {/* Brain toggle */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] md:text-xs uppercase tracking-wide text-[#F2E8DC]/60">
-                Brain
-              </span>
-              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
-                {/* ChatGPT button */}
-                <button
-                  onClick={() => handleSetProvider("openai")}
-                  className={`px-3 py-1 rounded-full transition flex items-center gap-1 ${
-                    provider === "openai"
-                      ? "bg-[#F2E8DC] text-[#0D0D0D]"
-                      : "text-[#F2E8DC]/70"
-                  }`}
-                >
-                  <Image
-                    src="/icons/openai.svg"
-                    alt="ChatGPT"
-                    width={16}
-                    height={16}
-                    className={`w-4 h-4 object-contain ${
-                      provider === "openai" ? "" : "invert opacity-70"
-                    }`}
-                  />
-                  <span>{" - ChatGPT"}</span>
-                </button>
-
-                {/* Claude button */}
-                <button
-                  onClick={() => handleSetProvider("claude")}
-                  className={`px-3 py-1 rounded-full transition flex items-center gap-1 ${
-                    provider === "claude"
-                      ? "bg-[#7E84F2] text-[#0D0D0D]"
-                      : "text-[#F2E8DC]/70"
-                  }`}
-                >
-                  <Image
-                    src="/icons/claude.svg"
-                    alt="Claude"
-                    width={16}
-                    height={16}
-                    className={`w-4 h-4 object-contain ${
-                      provider === "claude" ? "" : "invert opacity-70"
-                    }`}
-                  />
-                  <span>{" - Claude"}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="absolute top-4 right-4 flex items-center gap-3 z-20">
-            {/* Export buttons */}
-            <div className="flex items-center gap-2">
-              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
-                {/* Text File Export button */}
-                <button
-                  onClick={handleExportTextFile}
-                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
-                >
-                  <span>Text File</span>
-                </button>
-              </div>
-              <div className="flex bg-[#150140] rounded-full p-1 text-xs md:text-sm border border-[#7E84F2]/50">
-                {/* Google Docs MCP Export button */}
-                <button
-                  onClick={handleExportGoogleDoc}
-                  className="px-3 py-1 rounded-full transition flex items-center gap-1"
-                >
-                  <Image
-                    src="/icons/google.svg"
-                    alt="GoogleDocs"
-                    width={16}
-                    height={16}
-                    className={`w-4 h-4 object-contain invert opacity-80`}
-                  />
-                  <span>{" - Google Docs"}</span>
-                </button>
-              </div>
-              <span className="text-[10px] md:text-xs uppercase tracking-wide text-[#F2E8DC]/60">
-                Export
-              </span>
-            </div>
-          </div>
-        </>
+        <TopControls
+          provider={provider}
+          isMuted={isMuted}
+          onProviderChange={handleSetProvider}
+          onToggleMute={handleToggleMute}
+          onExportText={handleExportTextFile}
+          onExportGoogleDoc={handleExportGoogleDoc}
+          onExportGoogleDocViaMcp={handleExportGoogleDocViaMcp}
+        />
       )}
 
       {!showOrb ? (
-        <div className="flex flex-col items-center text-center gap-6 max-w-md">
-          <Image
-            src="/icons/poppy.png"
-            alt="Poppy"
-            width={256}
-            height={256}
-            className="w-50 h-50 object-contain"
-          />
-          <h1 className="text-3xl md:text-4xl font-bold">
-            Meet{" "}
-            <span className="text-[#7E84F2] drop-shadow-[0_0_12px_rgba(126,132,242,0.9)]">
-              Poppy
-            </span>
-            , your AI content buddy ✨
-          </h1>
-          <p className="text-sm md:text-base text-[#F2E8DC]/80">
-            Click below to drop into a voice-only session where Poppy helps you
-            turn your existing content into a content engine.
-          </p>
-          <button
-            onClick={handleStartExperience}
-            className="mt-4 px-8 py-3 rounded-full bg-[#F27979] hover:bg-[#F2A0A0] text-[#0D0D0D] font-semibold text-lg shadow-[0_0_25px_rgba(242,121,121,0.7)] transition-transform hover:scale-105"
-          >
-            Get Started
-          </button>
-        </div>
+        <PoppyHero onStartExperience={handleStartExperience} />
       ) : (
         <>
           {/* Center column: orb + transcript + chat */}
