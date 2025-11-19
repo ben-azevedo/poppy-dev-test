@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import TopControls from "./component/TopControls";
 import PoppyHero from "./component/PoppyHero";
 import ChatTranscript from "./component/ChatTranscript";
+import BoardsPanel from "./component/Sidebars/BoardsPanel";
 
 const isEmojiChar = (char: string): boolean => {
   if (!char) return false;
@@ -139,17 +140,11 @@ export default function Home() {
   const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
     null
   );
-  const [editingChatId, setEditingChatId] = useState<string | null>(null);
-  const [editingChatTitle, setEditingChatTitle] = useState("");
   const [boardTitleInput, setBoardTitleInput] = useState("");
   const [boardDescriptionInput, setBoardDescriptionInput] = useState("");
   const [boardLinkInput, setBoardLinkInput] = useState("");
   const [boardFormLinks, setBoardFormLinks] = useState<string[]>([]);
-const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
-  const [selectedBoardLinkInput, setSelectedBoardLinkInput] = useState("");
-  const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
-  const [editingBoardTitle, setEditingBoardTitle] = useState("");
-  const [editingBoardLinkInput, setEditingBoardLinkInput] = useState("");
+  const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
   const [linkTitleMap, setLinkTitleMap] = useState<Record<string, string>>({});
 
   // Refs to avoid stale state in callbacks
@@ -1372,49 +1367,6 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
       });
       return next;
     });
-    if (editingBoardId === boardId) {
-      setEditingBoardId(null);
-      setEditingBoardTitle("");
-    }
-  };
-
-  const handleBoardLinkAdd = () => {
-    if (!selectedBoard) {
-      alert("Select a board first.");
-      return;
-    }
-    const success = addLinkToBoard(selectedBoard.id, boardLinkInput);
-    if (success) {
-      setBoardLinkInput("");
-    }
-  };
-
-  const handleAddLinkToSelectedBoard = () => {
-    if (!selectedBoard) {
-      alert("Select a board to add links.");
-      return;
-    }
-    const success = addLinkToBoard(selectedBoard.id, selectedBoardLinkInput);
-    if (success) {
-      setSelectedBoardLinkInput("");
-    }
-  };
-
-  const handleBoardDocsUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedBoard) {
-      alert("Select a board to attach files to.");
-      return;
-    }
-    attachDocsToBoard(selectedBoard.id, e.target.files);
-    e.target.value = "";
-  };
-
-  const handleInlineBoardDocsUpload = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    boardId: string
-  ) => {
-    attachDocsToBoard(boardId, e.target.files);
-    e.target.value = "";
   };
 
   const handleAddBoardFormLink = () => {
@@ -1505,8 +1457,6 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
     if (!chat) return;
     setMessages(chat.messages);
     setSelectedSavedChatId(chatId);
-    setEditingChatId(null);
-    setEditingChatTitle("");
   };
 
   const handleSaveSelectedBoard = () => {
@@ -1533,69 +1483,15 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
     );
   };
 
-  const handleStartEditingBoardTitle = (board: Board) => {
-    setEditingBoardId(board.id);
-    setEditingBoardTitle(board.title);
-    setEditingBoardLinkInput("");
-    setSelectedBoardIds((prev) => [board.id, ...prev.filter((id) => id !== board.id)]);
-  };
-
-  const handleCancelEditingBoardTitle = () => {
-    setEditingBoardId(null);
-    setEditingBoardTitle("");
-    setEditingBoardLinkInput("");
-  };
-
-  const handleSaveEditingBoardTitle = () => {
-    if (!editingBoardId) return;
-    const trimmed = editingBoardTitle.trim();
-    if (!trimmed) {
-      alert("Give this board a title before saving.");
-      return;
-    }
-    setBoards((prev) =>
-      prev.map((board) =>
-        board.id === editingBoardId ? { ...board, title: trimmed } : board
-      )
-    );
-    setEditingBoardId(null);
-    setEditingBoardTitle("");
-    setEditingBoardLinkInput("");
-  };
-
   const handleDeleteSavedChat = (chatId: string) => {
     setSavedChats((prev) => prev.filter((chat) => chat.id !== chatId));
     setSelectedSavedChatId((prev) => (prev === chatId ? null : prev));
-    if (editingChatId === chatId) {
-      setEditingChatId(null);
-      setEditingChatTitle("");
-    }
   };
 
-  const handleStartEditingChat = (chat: SavedChat) => {
-    setEditingChatId(chat.id);
-    setEditingChatTitle(chat.title || "");
-  };
-
-  const handleCancelEditingChat = () => {
-    setEditingChatId(null);
-    setEditingChatTitle("");
-  };
-
-  const handleSaveEditingChat = () => {
-    if (!editingChatId) return;
-    const trimmed = editingChatTitle.trim();
-    if (!trimmed) {
-      alert("Give this saved chat a short title before saving.");
-      return;
-    }
+  const handleRenameSavedChat = (chatId: string, title: string) => {
     setSavedChats((prev) =>
-      prev.map((chat) =>
-        chat.id === editingChatId ? { ...chat, title: trimmed } : chat
-      )
+      prev.map((chat) => (chat.id === chatId ? { ...chat, title } : chat))
     );
-    setEditingChatId(null);
-    setEditingChatTitle("");
   };
 
   // 🔧 Reusable side link panel
@@ -1743,338 +1639,6 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
     );
   };
 
-  const BoardDisplayPanel = ({ className = "" }: { className?: string }) => {
-
-    const renderBoardsList = () => {
-      if (boards.length === 0) {
-        return (
-          <p className="text-[11px] text-[#F2E8DC]/50">
-            Create your first board on the right to get started.
-          </p>
-        );
-      }
-      return (
-        <div className="flex flex-col gap-2">
-          {boards.map((board) => {
-            const isSelected = selectedBoardIds.includes(board.id);
-            const isEditingThis = editingBoardId === board.id;
-            return (
-              <div
-                key={board.id}
-                className={`rounded-2xl border px-3 py-2 transition ${
-                  isSelected
-                    ? "border-[#F27979] bg-[#F27979]/10"
-                    : "border-[#7E84F2]/30 hover:border-[#7E84F2]/60"
-                }`}
-              >
-                {isEditingThis ? (
-                  <div className="space-y-2">
-                    <input
-                      autoFocus
-                      value={editingBoardTitle}
-                      onChange={(e) => setEditingBoardTitle(e.target.value)}
-                      placeholder="Board title"
-                      className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-                    />
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={handleCancelEditingBoardTitle}
-                        className="px-3 py-1 rounded-full text-[11px] border border-[#7E84F2]/40 text-[#F2E8DC]/70 hover:border-[#7E84F2]/80"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleSaveEditingBoardTitle}
-                        className="px-3 py-1 rounded-full text-[11px] font-semibold bg-[#7E84F2] text-[#0D0D0D] hover:bg-[#959AF8]"
-                      >
-                        Save
-                      </button>
-                    </div>
-                    <div className="space-y-2 rounded-2xl border border-dashed border-[#7E84F2]/40 px-3 py-2 bg-[#0D0D0D]/30">
-                      <p className="text-[10px] text-[#F2E8DC]/60">
-                        Add or remove board-specific links
-                      </p>
-                      <div className="flex gap-2">
-                        <input
-                          value={editingBoardLinkInput}
-                          onChange={(e) =>
-                            setEditingBoardLinkInput(e.target.value)
-                          }
-                          placeholder="https://example.com/video"
-                          className="flex-1 rounded-full px-3 py-1.5 text-[11px] bg-[#050505] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-                        />
-                        <button
-                          onClick={() => {
-                            if (editingBoardId) {
-                              const added = addLinkToBoard(
-                                board.id,
-                                editingBoardLinkInput
-                              );
-                              if (added) {
-                                setEditingBoardLinkInput("");
-                              }
-                            }
-                          }}
-                          className="rounded-full px-3 py-1.5 text-[11px] bg-[#7E84F2] text-[#0D0D0D] font-semibold hover:bg-[#959AF8]"
-                        >
-                          Add link
-                        </button>
-                      </div>
-                      {board.links.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {board.links.map((link) => (
-                            <span
-                              key={link}
-                              className="inline-flex items-center gap-1 rounded-full bg-[#050505] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[140px] truncate"
-                            >
-                              {getLinkDisplayLabel(link)}
-                              <button
-                                onClick={() =>
-                                  removeLinkFromBoard(board.id, link)
-                                }
-                                className="text-[#F2E8DC]/60 hover:text-[#F2E8DC]"
-                              >
-                                ✕
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-[#F2E8DC]/50">
-                          No links yet in this board.
-                        </p>
-                      )}
-                    </div>
-                    <div className="space-y-2 rounded-2xl border border-dashed border-[#7E84F2]/40 px-3 py-2 bg-[#0D0D0D]/30">
-                      <p className="text-[10px] text-[#F2E8DC]/60">
-                        Attach or remove board-specific files
-                      </p>
-                      <input
-                        type="file"
-                        multiple
-                        accept=".txt,.md,.markdown,.csv"
-                        onChange={(e) => handleInlineBoardDocsUpload(e, board.id)}
-                        className="text-[10px] text-[#F2E8DC]/70 file:mr-2 file:rounded-full file:border-0 file:bg-[#7E84F2] file:px-3 file:py-0.5 file:text-[10px] file:font-semibold file:text-[#0D0D0D] file:hover:bg-[#959AF8] file:cursor-pointer cursor-pointer"
-                      />
-                      {board.docs.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {board.docs.map((doc) => (
-                            <span
-                              key={doc.id}
-                              className="inline-flex items-center gap-1 rounded-full bg-[#050505] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[140px] truncate"
-                            >
-                              {doc.name}
-                              <button
-                                onClick={() => removeDocFromBoard(board.id, doc.id)}
-                                className="text-[#F2E8DC]/60 hover:text-[#F2E8DC]"
-                              >
-                                ✕
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-[#F2E8DC]/50">
-                          No files yet in this board.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => toggleBoardSelection(board.id)}
-                      className="text-left w-full"
-                    >
-                      <p className="text-xs md:text-sm font-semibold text-[#F2E8DC]">
-                        {board.title}
-                      </p>
-                      {board.description && (
-                        <p className="text-[11px] text-[#F2E8DC]/60 truncate">
-                          {board.description}
-                        </p>
-                      )}
-                      <div className="mt-1 space-y-1">
-                        {board.links.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {board.links.slice(0, 3).map((link) => (
-                              <span
-                                key={link}
-                                className="inline-flex items-center gap-1 rounded-full bg-[#150140] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[120px] truncate"
-                              >
-                                {getLinkDisplayLabel(link)}
-                              </span>
-                            ))}
-                            {board.links.length > 3 && (
-                              <span className="text-[10px] text-[#F2E8DC]/60">
-                                +{board.links.length - 3} more link
-                                {board.links.length - 3 === 1 ? "" : "s"}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {board.docs.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {board.docs.slice(0, 3).map((doc) => (
-                              <span
-                                key={doc.id}
-                                className="inline-flex items-center gap-1 rounded-full bg-[#0D0D0D] border border-[#7E84F2]/30 px-2 py-0.5 text-[10px] text-[#F2E8DC]/70 max-w-[120px] truncate"
-                              >
-                                {doc.name}
-                              </span>
-                            ))}
-                            {board.docs.length > 3 && (
-                              <span className="text-[10px] text-[#F2E8DC]/60">
-                                +{board.docs.length - 3} more file
-                                {board.docs.length - 3 === 1 ? "" : "s"}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-[#F2E8DC]/40 mt-1">
-                        {isSelected ? "Selected" : "Tap to select"}
-                      </p>
-                    </button>
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        onClick={() => handleStartEditingBoardTitle(board)}
-                        className="text-[11px] text-[#F2E8DC]/70 hover:text-[#F2E8DC]"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteBoard(board.id)}
-                        className="text-[11px] text-[#F27979] hover:text-[#F2A0A0]"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      );
-    };
-
-    const renderSavedChats = () => {
-      if (savedChats.length === 0) {
-        return (
-          <p className="text-[11px] text-[#F2E8DC]/50">
-            No saved chats yet. Use the button above after you talk to Poppy.
-          </p>
-        );
-      }
-
-      return (
-        <div className="flex flex-col gap-3 max-h-64 overflow-y-auto">
-          {savedChats.map((chat) => {
-            const isSelected = selectedSavedChatId === chat.id;
-            const isEditing = editingChatId === chat.id;
-            return (
-              <div
-                key={chat.id}
-                className={`rounded-2xl border px-3 py-2 transition ${
-                  isSelected ? "border-[#F27979]" : "border-[#7E84F2]/30"
-                }`}
-              >
-                {isEditing ? (
-                  <div className="space-y-2">
-                    <input
-                      autoFocus
-                      value={editingChatTitle}
-                      onChange={(e) => setEditingChatTitle(e.target.value)}
-                      placeholder="Saved chat title"
-                      className="w-full rounded-full px-3 py-2 text-xs md:text-sm bg-[#0D0D0D] border border-[#7E84F2]/40 text-[#F2E8DC] placeholder:text-[#F2E8DC]/40 focus:outline-none focus:border-[#7E84F2]"
-                    />
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={handleCancelEditingChat}
-                        className="px-3 py-1 rounded-full text-[11px] border border-[#7E84F2]/40 text-[#F2E8DC]/70 hover:border-[#7E84F2]/80"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleSaveEditingChat}
-                        className="px-3 py-1 rounded-full text-[11px] font-semibold bg-[#7E84F2] text-[#0D0D0D] hover:bg-[#959AF8]"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => handleSelectSavedChat(chat.id)}
-                      className="text-left w-full"
-                    >
-                      <p className="text-xs md:text-sm font-semibold text-[#F2E8DC] truncate">
-                        {chat.title || "Saved chat"}
-                      </p>
-                      <p className="text-[11px] text-[#F2E8DC]/50">
-                        {new Date(chat.savedAt).toLocaleString()}
-                      </p>
-                    </button>
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        onClick={() => handleStartEditingChat(chat)}
-                        className="text-[11px] text-[#F2E8DC]/70 hover:text-[#F2E8DC]"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteSavedChat(chat.id)}
-                        className="text-[11px] text-[#F27979] hover:text-[#F2A0A0]"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      );
-    };
-
-    const canSaveChat = messages.length > 0;
-
-    return (
-      <div
-        className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
-      >
-        <div className="space-y-2 border-[#7E84F2]/20">
-          <p className="text-[11px] text-[#F2E8DC]/60 uppercase tracking-wide">
-            Boards
-          </p>
-          {renderBoardsList()}
-        </div>
-
-        <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] text-[#F2E8DC]/60 uppercase tracking-wide">
-              Saved chats
-            </p>
-            <button
-              onClick={handleSaveCurrentChat}
-              disabled={!canSaveChat}
-              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-                canSaveChat
-                  ? "bg-[#7E84F2] text-[#0D0D0D] hover:bg-[#959AF8]"
-                  : "bg-[#5f5b73] text-[#aaa] cursor-not-allowed"
-              }`}
-            >
-              Save current chat
-            </button>
-          </div>
-          {renderSavedChats()}
-        </div>
-      </div>
-    );
-  };
   // Handle exporting
   const buildLocalSummary = (): string => {
     const msgs = messagesRef.current;
@@ -2413,7 +1977,22 @@ const [boardFormDocs, setBoardFormDocs] = useState<BoardDoc[]>([]);
           </div>
 
           <div className="w-full max-w-2xl mt-4 md:mt-0 md:absolute md:left-4 md:top-28 md:w-80">
-            <BoardDisplayPanel />
+            <BoardsPanel
+              boards={boards}
+              selectedBoardIds={selectedBoardIds}
+              getLinkDisplayLabel={getLinkDisplayLabel}
+              onToggleBoard={toggleBoardSelection}
+              onUpdateBoard={updateBoard}
+              onDeleteBoard={handleDeleteBoard}
+              onAttachDocs={attachDocsToBoard}
+              savedChats={savedChats}
+              selectedSavedChatId={selectedSavedChatId}
+              canSaveChat={messages.length > 0}
+              onSaveChat={handleSaveCurrentChat}
+              onSelectChat={handleSelectSavedChat}
+              onDeleteChat={handleDeleteSavedChat}
+              onRenameChat={handleRenameSavedChat}
+            />
           </div>
           <div className="w-full max-w-2xl mt-4 md:mt-0 md:absolute md:right-4 md:top-28 md:w-80">
             <LinkPanel />
