@@ -9,6 +9,8 @@ import BoardFormPanel from "./component/Sidebars/BoardFormPanel";
 import OrbVisualizer from "./component/OrbVisualizer";
 import useOrbVisualizer from "./component/useOrbVisualizer";
 import useLinkMetadataCache from "./component/useLinkMetadataCache";
+import useLocalStorageBoards from "./component/useLocalStorageBoards";
+import useLocalStorageChats from "./component/useLocalStorageChats";
 
 const isEmojiChar = (char: string): boolean => {
   if (!char) return false;
@@ -138,11 +140,10 @@ export default function Home() {
   const [contentLinks, setContentLinks] = useState<string[]>([]);
   const [linkInput, setLinkInput] = useState("");
 
-  // Text docs state
   const [contentDocs, setContentDocs] = useState<ContentDoc[]>([]);
-  const [boards, setBoards] = useState<Board[]>([]);
+  const { boards, setBoards } = useLocalStorageBoards();
+  const { savedChats, setSavedChats } = useLocalStorageChats();
   const [selectedBoardIds, setSelectedBoardIds] = useState<string[]>([]);
-  const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
   const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
     null
   );
@@ -182,47 +183,6 @@ export default function Home() {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("poppyBoards");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as Board[];
-        setBoards(parsed);
-        if (parsed.length > 0) {
-          setSelectedBoardIds([parsed[0].id]);
-        }
-      } catch (err) {
-        console.warn("Failed to parse stored boards", err);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storedChats = window.localStorage.getItem("poppySavedChats");
-    if (storedChats) {
-      try {
-        const parsed = JSON.parse(storedChats) as SavedChat[];
-        if (Array.isArray(parsed)) {
-          setSavedChats(parsed);
-        }
-      } catch (err) {
-        console.warn("Failed to parse saved chats", err);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("poppyBoards", JSON.stringify(boards));
-  }, [boards]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("poppySavedChats", JSON.stringify(savedChats));
-  }, [savedChats]);
 
   // 🧠 Setup SpeechRecognition on mount
   useEffect(() => {
