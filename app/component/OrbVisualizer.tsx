@@ -3,33 +3,29 @@
 import Image from "next/image";
 import { CSSProperties, RefObject } from "react";
 
-type VoiceControlsProps = {
-  isListening: boolean;
-  isSpeaking: boolean;
-  isThinking: boolean;
-  pendingTranscript: string;
-  showPendingTranscript: boolean;
+type OrbVisualizerProps = {
   orbState: "listening" | "speaking" | "thinking" | "idle";
   auraStyle: CSSProperties;
   innerOrbStyle: CSSProperties;
+  pendingTranscript: string;
+  showPendingTranscript: boolean;
+  isListening: boolean;
+  onToggleListening: () => void;
   orbCanvasRef: RefObject<HTMLCanvasElement>;
   poppyImageRef: RefObject<HTMLDivElement>;
-  onToggleListening: () => void;
 };
 
-export default function VoiceControls({
-  isListening,
-  isSpeaking,
-  isThinking,
-  pendingTranscript,
-  showPendingTranscript,
+export default function OrbVisualizer({
   orbState,
   auraStyle,
   innerOrbStyle,
+  pendingTranscript,
+  showPendingTranscript,
+  isListening,
+  onToggleListening,
   orbCanvasRef,
   poppyImageRef,
-  onToggleListening,
-}: VoiceControlsProps) {
+}: OrbVisualizerProps) {
   return (
     <>
       <div
@@ -97,16 +93,16 @@ export default function VoiceControls({
               className="w-24 h-24 md:w-36 md:h-36 object-contain"
             />
           </div>
-                {(orbState !== "speaking" || isListening) && (
-                  <span className="text-sm md:text-base font-semibold text-center px-6 text-[#F2E8DC] relative z-10">
-                    {isListening
-                      ? "I’m listening… tap when you’re done 🎧"
-                      : isThinking
-                      ? "Let me think… 🧠"
-                      : "Tap to talk to me 💬"}
-                  </span>
-                )}
-              </div>
+          {(orbState !== "speaking" || isListening) && (
+            <span className="text-sm md:text-base font-semibold text-center px-6 text-[#F2E8DC] relative z-10">
+              {isListening
+                ? "I’m listening… tap when you’re done 🎧"
+                : orbState === "thinking"
+                ? "Let me think… 🧠"
+                : "Tap to talk to me 💬"}
+            </span>
+          )}
+        </div>
       </div>
 
       {showPendingTranscript && (

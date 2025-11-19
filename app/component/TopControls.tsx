@@ -27,7 +27,7 @@ export default function TopControls({
     <>
       <div className="absolute top-4 left-4 flex items-center gap-3 z-20">
         {/* Mute toggle */}
-        <button
+        {/* <button
           onClick={onToggleMute}
           className={`rounded-full px-3 py-1 text-xs md:text-sm border transition flex items-center gap-1 ${
             isMuted
@@ -39,7 +39,7 @@ export default function TopControls({
           <span className="hidden md:inline">
             {isMuted ? "Muted" : "Voice on"}
           </span>
-        </button>
+        </button> */}
 
         {/* Brain toggle */}
         <div className="flex items-center gap-2">
