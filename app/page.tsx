@@ -11,6 +11,7 @@ import useOrbVisualizer from "./component/useOrbVisualizer";
 import useLinkMetadataCache from "./component/useLinkMetadataCache";
 import useLocalStorageBoards from "./component/useLocalStorageBoards";
 import useLocalStorageChats from "./component/useLocalStorageChats";
+import useSpeechRecognition from "./component/useSpeechRecognition";
 
 const isEmojiChar = (char: string): boolean => {
   if (!char) return false;
@@ -121,11 +122,9 @@ const generateId = () =>
 
 export default function Home() {
   const [showOrb, setShowOrb] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [pendingTranscript, setPendingTranscript] = useState("");
 
   // ElevenLabs Voice
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -151,10 +150,18 @@ export default function Home() {
   const messagesRef = useRef<Message[]>([]);
   const contentLinksRef = useRef<string[]>([]);
   const contentDocsRef = useRef<ContentDoc[]>([]);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const isMutedRef = useRef(false);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const typingControllerRef = useRef<{ cancel: () => void } | null>(null);
+
+  const {
+    isSupported: isSpeechSupported,
+    isListening,
+    pendingTranscript,
+    startListening,
+    stopListening,
+    resetTranscript,
+  } = useSpeechRecognition({ language: "en-US" });
 
   // Scroll container ref
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -183,51 +190,6 @@ export default function Home() {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
-
-  // 🧠 Setup SpeechRecognition on mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    // @ts-ignore - Web Speech API types aren't built-in everywhere
-    const SpeechRecognition =
-      window.SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      console.warn("SpeechRecognition not supported in this browser.");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = true; // let it keep listening
-    recognition.interimResults = false; // we only care about final chunks
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      // Build up the full utterance over multiple results
-      let fullText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        fullText += event.results[i][0].transcript + " ";
-      }
-      fullText = fullText.trim();
-      console.log("🎙 accumulated transcript chunk:", fullText);
-
-      if (!fullText) return;
-
-      // Append this chunk to the pending transcript
-      setPendingTranscript((prev) => (prev ? `${prev} ${fullText}` : fullText));
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.error("Speech recognition error:", event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-  }, []);
 
   // 🎙 Pick a stable voice for Poppy once voices are available
   useEffect(() => {
@@ -713,7 +675,7 @@ export default function Home() {
       return;
     }
 
-    if (!recognitionRef.current) {
+    if (!isSpeechSupported) {
       alert(
         "Your browser doesn’t support voice input. Try Chrome for the full experience."
       );
@@ -722,8 +684,7 @@ export default function Home() {
 
     if (isListening) {
       // 👉 User is DONE talking: stop and send the turn
-      recognitionRef.current.stop();
-      setIsListening(false);
+      stopListening();
 
       const finalText = pendingTranscript.trim();
       if (finalText) {
@@ -734,7 +695,7 @@ export default function Home() {
         ];
 
         setMessages(updated);
-        setPendingTranscript("");
+        resetTranscript();
         setIsThinking(true);
 
         // Use ALL current links + docs + full history
@@ -761,10 +722,9 @@ export default function Home() {
         window.speechSynthesis.cancel();
       }
       setIsSpeaking(false);
-      setPendingTranscript(""); // clear previous draft
+      resetTranscript(); // clear previous draft
 
-      setIsListening(true);
-      recognitionRef.current.start();
+      startListening();
     }
   };
 
