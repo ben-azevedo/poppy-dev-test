@@ -12,6 +12,8 @@ type TopControlsProps = {
   onExportText: () => void;
   onExportGoogleDoc: () => void;
   onExportGoogleDocViaMcp: () => void;
+  isPartyMode: boolean;
+  onTogglePartyMode: () => void;
 };
 
 export default function TopControls({
@@ -22,11 +24,12 @@ export default function TopControls({
   onExportText,
   onExportGoogleDoc,
   onExportGoogleDocViaMcp,
+  isPartyMode,
+  onTogglePartyMode,
 }: TopControlsProps) {
   return (
     <>
       <div className="absolute top-4 left-4 flex items-center gap-3 z-20">
-        {/* Mute toggle */}
         {/* <button
           onClick={onToggleMute}
           className={`rounded-full px-3 py-1 text-xs md:text-sm border transition flex items-center gap-1 ${
@@ -42,7 +45,21 @@ export default function TopControls({
         </button> */}
 
         {/* Brain toggle */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onTogglePartyMode}
+            className={`rounded-full px-3 py-1 text-xs md:text-sm border transition flex items-center gap-1 ${
+              isPartyMode
+                ? "bg-[#F27979] border-[#F27979]/70 text-[#0D0D0D]"
+                : "bg-transparent border-[#F27979]/60 text-[#F2E8DC]/70"
+            }`}
+          >
+            <span>🎉</span>
+            <span className="hidden md:inline">
+              {isPartyMode ? "Party Mode On" : "Party Mode"}
+            </span>
+          </button>
+
           <span className="text-[10px] md:text-xs uppercase tracking-wide text-[#F2E8DC]/60">
             Brain
           </span>
