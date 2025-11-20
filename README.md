@@ -4,7 +4,6 @@ Poppy is an AI sidekick that lets creators talk through their content strategy, 
 
 ## Demo
 - Live app: `<LIVE_DEMO_URL>`
-- Loom walkthrough: `<LOOM_URL>`
 
 ## What It Does (Dev Test Requirements)
 - Click *Start Experience* → the full-screen orb takes over.
@@ -18,7 +17,9 @@ Poppy is an AI sidekick that lets creators talk through their content strategy, 
 
 ## Tech Stack
 - **Next.js (App Router)** with client-side components for the orb, chat column, and sidebars.
-- **Vercel AI SDK v5** calling Anthropic Claude Sonnet + OpenAI GPT-4.1-mini with tool-calling.
+- **Vercel AI SDK v5** – using the new `ai` package:
+  - `ai` for `generateText`, `streamText`, tool-calling.
+  - `@ai-sdk/openai` + `@ai-sdk/anthropic` providers for OpenAI + Claude.
 - **ElevenLabs TTS** for Poppy’s spoken replies.
 - **MCP (Model Context Protocol)** stdio server to export summaries straight into Google Docs.
 - **Tailwind CSS** for the neon/funky UI plus responsive layouts.
@@ -49,6 +50,21 @@ Poppy is an AI sidekick that lets creators talk through their content strategy, 
    pnpm dev
    ```
 4. Visit `http://localhost:3000` and start chatting.
+
+## Deploying to Vercel
+
+1. Push this repo to GitHub.
+2. Create a new project on [Vercel](https://vercel.com) and import the repo.
+3. In the Vercel project settings, add the same env vars as `.env.local`:
+   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - `ELEVENLABS_API_KEY`
+   - `ELEVENLABS_VOICE_ID`
+   - `GOOGLE_CLIENT_ID`
+   - `GOOGLE_CLIENT_SECRET`
+   - `GOOGLE_REDIRECT_URI`
+   - `GOOGLE_REFRESH_TOKEN`
+4. Deploy – the app will be available at `https://<project-name>.vercel.app`.
 
 ## How to Use It
 1. Click **“Start Experience”** so the orb fills the screen.
@@ -87,3 +103,4 @@ Poppy is an AI sidekick that lets creators talk through their content strategy, 
 - **MCP Google Docs Export** – Full pipeline from OAuth → MCP server → AI SDK tool → chat narration. [Full writeup](docs/mcp-google-docs.md)
 - **Typing + TTS Sync** – Keeping ElevenLabs playback and on-screen typing perfectly in sync so Poppy “talks while she types.” [Full writeup](docs/typing-tts-sync.md)
 - **Double Messages Bug** – Removing side-effects from React state updaters to stop duplicate API calls/responses. [Full writeup](docs/double-messages-bug.md)
+
