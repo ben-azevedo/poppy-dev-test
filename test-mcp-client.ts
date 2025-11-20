@@ -10,10 +10,16 @@ import {
 
 async function main() {
   // To spawn MCP server using tsx + mcp-server.ts
+  const env: Record<string, string> = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string"
+    )
+  );
+
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["tsx", "mcp-server.ts"],
-    env: process.env, // forward Google credentials
+    env,
   });
 
   const client = new Client({
