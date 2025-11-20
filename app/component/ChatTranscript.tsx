@@ -3,18 +3,11 @@
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-type Provider = "openai" | "claude";
-
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-  provider?: Provider;
-};
+import type { Message } from "../types";
 
 type ChatTranscriptProps = {
   messages: Message[];
-  messagesContainerRef: React.RefObject<HTMLDivElement>;
+  messagesContainerRef: React.RefObject<HTMLDivElement | null>;
 };
 
 export default function ChatTranscript({

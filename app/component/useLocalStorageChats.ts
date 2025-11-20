@@ -1,21 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { SavedChat } from "../types";
 
 const STORAGE_KEY = "poppySavedChats";
-
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-  provider?: "openai" | "claude";
-};
-
-type SavedChat = {
-  id: string;
-  title: string;
-  savedAt: number;
-  messages: Message[];
-};
 
 export default function useLocalStorageChats(initialValue: SavedChat[] = []) {
   const [savedChats, setSavedChats] = useState<SavedChat[]>(initialValue);

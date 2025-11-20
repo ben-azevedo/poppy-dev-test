@@ -1,22 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { Board } from "../types";
 
 const STORAGE_KEY = "poppyBoards";
-
-type BoardDoc = {
-  id: string;
-  name: string;
-  text: string;
-};
-
-type Board = {
-  id: string;
-  title: string;
-  description: string;
-  links: string[];
-  docs: BoardDoc[];
-};
 
 export default function useLocalStorageBoards(initialValue: Board[] = []) {
   const [boards, setBoards] = useState<Board[]>(initialValue);

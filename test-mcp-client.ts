@@ -1,4 +1,3 @@
-// test-mcp-client.ts
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
@@ -10,11 +9,11 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 async function main() {
-  // This will spawn your MCP server using tsx + mcp-server.ts
+  // To spawn MCP server using tsx + mcp-server.ts
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["tsx", "mcp-server.ts"],
-    env: process.env, // forward your Google creds etc
+    env: process.env, // forward Google credentials
   });
 
   const client = new Client({
@@ -26,14 +25,14 @@ async function main() {
   await client.connect(transport);
   console.log("✅ Connected!");
 
-  // 1) List tools so we can see `export-google-doc`
+  // List tools to see export-google-doc
   const tools = await client.request(
     { method: "tools/list" },
     ListToolsResultSchema
   );
   console.log("🧰 Tools available:\n", JSON.stringify(tools, null, 2));
 
-  // 2) Call your export-google-doc tool
+  // Call export-google-doc tool
   const result = await client.request(
     {
       method: "tools/call",

@@ -34,8 +34,8 @@ export default function useOrbVisualizer({
   isThinking,
   orbState,
 }: UseOrbVisualizerParams): UseOrbVisualizerResult {
-  const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const poppyImageRef = useRef<HTMLDivElement | null>(null);
+  const orbCanvasRef = useRef<HTMLCanvasElement>(null!);
+  const poppyImageRef = useRef<HTMLDivElement>(null!);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);

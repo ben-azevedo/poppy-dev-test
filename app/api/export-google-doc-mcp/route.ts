@@ -1,10 +1,9 @@
-// app/api/export-google-doc-mcp/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
-export const runtime = "nodejs"; // ensure Node runtime
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,12 +18,12 @@ export async function POST(req: NextRequest) {
         ? title.trim()
         : "Poppy Action Plan (MCP)";
 
-    // 🔌 Same pattern as your working test-mcp-client.ts
+    // Same pattern as test-mcp-client.ts
     const transport = new StdioClientTransport({
       command: "npx",
       args: ["tsx", "mcp-server.ts"],
       env: process.env,
-    });
+    } as any);
 
     const client = new Client({
       name: "poppy-next-api",
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest) {
       // Connect to MCP server (spawns mcp-server.ts)
       await client.connect(transport);
 
-      // ✅ IMPORTANT: pass CallToolResultSchema as 2nd arg
+      // Passes CallToolResultSchema as 2nd arg
       const result = await client.request(
         {
           method: "tools/call",
@@ -55,7 +54,6 @@ export async function POST(req: NextRequest) {
       // Try to extract docUrl from structuredContent or text content
       let docUrl: string | undefined;
 
-      // @ts-ignore – depending on SDK version, structuredContent may exist
       const structured: any = (result as any).structuredContent;
       if (structured && typeof structured.docUrl === "string") {
         docUrl = structured.docUrl;

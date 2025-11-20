@@ -1,4 +1,3 @@
-// app/api/export-google-doc/route.ts
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -27,7 +26,6 @@ export async function POST(req: NextRequest) {
       return new NextResponse("Google OAuth not configured", { status: 500 });
     }
 
-    // OAuth2 client acting as YOU
     const oauth2Client = new google.auth.OAuth2(
       clientId,
       clientSecret,
@@ -36,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     oauth2Client.setCredentials({ refresh_token: refreshToken });
 
-    // Make sure we have a fresh access token
+    // Ensures a fresh access token
     await oauth2Client.getAccessToken();
 
     const docs = google.docs({ version: "v1", auth: oauth2Client });

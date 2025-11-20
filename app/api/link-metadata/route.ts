@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 
-const UA =
-  "Mozilla/5.0 (compatible; PoppyAI-LinkMeta/1.0; +https://poppy.ai)";
+const UA = "Mozilla/5.0 (compatible; PoppyAI-LinkMeta/1.0; +https://poppy.ai)";
 
 async function fetchNoEmbedTitle(url: string): Promise<string | null> {
   try {

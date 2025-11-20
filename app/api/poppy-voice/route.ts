@@ -1,7 +1,5 @@
-// app/api/poppy-voice/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-// Make sure this route runs on the Node runtime (not edge)
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
@@ -14,7 +12,7 @@ export async function POST(req: NextRequest) {
     }
 
     const apiKey = process.env.ELEVENLABS_API_KEY;
-    const voiceId = process.env.ELEVENLABS_VOICE_ID; // your custom "Poppy" voice
+    const voiceId = process.env.ELEVENLABS_VOICE_ID;
 
     if (!apiKey || !voiceId) {
       console.error(
@@ -33,7 +31,7 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           text,
-          model_id: "eleven_monolingual_v1", // you can change to another ElevenLabs model if you want
+          model_id: "eleven_monolingual_v1",
           voice_settings: {
             stability: 0.4,
             similarity_boost: 0.9,

@@ -1,7 +1,6 @@
-// app/api/poppy-tts/route.ts
 import { NextRequest } from "next/server";
 
-export const runtime = "nodejs"; // or "edge" if you prefer, but Node is safer with some libs
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +11,7 @@ export async function POST(req: NextRequest) {
     }
 
     const apiKey = process.env.ELEVENLABS_API_KEY;
-    const voiceId = process.env.ELEVENLABS_VOICE_ID; // set this in .env.local
+    const voiceId = process.env.ELEVENLABS_VOICE_ID;
 
     if (!apiKey || !voiceId) {
       console.error(
@@ -33,7 +32,7 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           text,
-          model_id: "eleven_multilingual_v2", // or your chosen model
+          model_id: "eleven_multilingual_v2",
           voice_settings: {
             stability: 0.4,
             similarity_boost: 0.9,

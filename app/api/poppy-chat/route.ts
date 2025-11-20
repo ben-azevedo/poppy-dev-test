@@ -5,51 +5,42 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { ContentDoc, Message, Provider } from "../../types";
 
 export const runtime = "nodejs";
 
 let lastExportDocUrl: string | null = null;
 
 const SYSTEM_PROMPT = `
-You are Poppy – a playful, friendly, slightly sassy *female* AI content coach.
+  You are Poppy – a playful, friendly, slightly sassy *female* AI content coach.
 
-Your job:
-- Help new Poppy users understand how to use Poppy to create content.
-- Focus on onboarding: teach them they can import their YouTube, Instagram, TikTok, landing pages, and other sales/marketing content.
-- Explain that those assets become their "brand voice" and "content brain" inside Poppy.
-- Show them that once their content is in Poppy, it can:
-  - Generate hooks, titles, scripts, email copy, and ad copy in their voice.
-  - Remix and repurpose content into new formats.
-  - Imitate the *structure* and *style* of their best-performing ads.
+  Your job:
+  - Help new Poppy users understand how to use Poppy to create content.
+  - Focus on onboarding: teach them they can import their YouTube, Instagram, TikTok, landing pages, and other sales/marketing content.
+  - Explain that those assets become their "brand voice" and "content brain" inside Poppy.
+  - Show them that once their content is in Poppy, it can:
+    - Generate hooks, titles, scripts, email copy, and ad copy in their voice.
+    - Remix and repurpose content into new formats.
+    - Imitate the *structure* and *style* of their best-performing ads.
 
-Style:
-- Fun, upbeat, encouraging, but never cringey.
-- Keep answers clear and concrete; avoid huge monologues.
-- Ask short, focused questions to move the conversation forward.
-- Assume the user is a creator/founder/marketer trying to grow.
+  Style:
+  - Fun, upbeat, encouraging, but never cringey.
+  - Keep answers clear and concrete; avoid huge monologues.
+  - Ask short, focused questions to move the conversation forward.
+  - Assume the user is a creator/founder/marketer trying to grow.
 
-Constraints:
-- NO technical explanation of how the backend works.
-- Keep it in the “I’m your AI buddy helping you make banger content” vibe.
-- When using their source content, talk about it like:
-  "Based on this ad titled '...', here's a hook in the same style..."
-`;
-
-type SimpleMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
+  Constraints:
+  - NO technical explanation of how the backend works.
+  - Keep it in the “I’m your AI buddy helping you make banger content” vibe.
+  - When using their source content, talk about it like:
+    "Based on this ad titled '...', here's a hook in the same style..."
+  `;
 
 type LinkSummary = {
   url: string;
   title?: string;
   description?: string;
   transcript?: string;
-};
-
-type ContentDoc = {
-  name: string;
-  text: string;
 };
 
 async function exportToGoogleDocViaMcp(
@@ -67,7 +58,9 @@ async function exportToGoogleDocViaMcp(
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["tsx", "mcp-server.ts"],
-    env: process.env,
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(([, v]) => v !== undefined)
+    ) as Record<string, string>,
   });
 
   const client = new Client({
@@ -149,7 +142,13 @@ const poppyTools = {
       },
       required: ["content"],
     }),
-    execute: async ({ title, content }: { title?: string; content: string }) => {
+    execute: async ({
+      title,
+      content,
+    }: {
+      title?: string;
+      content: string;
+    }) => {
       console.log("🧰 Tool called: export_poppy_summary_to_google_doc", {
         title,
         contentPreview: content.slice(0, 200),
@@ -182,17 +181,17 @@ function getYouTubeVideoId(url: string): string | null {
     const u = new URL(url);
 
     if (u.hostname.includes("youtu.be")) {
-      // e.g. https://youtu.be/VIDEO_ID
+      // https://youtu.be/VIDEO_ID
       const id = u.pathname.replace("/", "");
       return id || null;
     }
 
     if (u.hostname.includes("youtube.com")) {
-      // e.g. https://www.youtube.com/watch?v=VIDEO_ID
+      // https://www.youtube.com/watch?v=VIDEO_ID
       const v = u.searchParams.get("v");
       if (v) return v;
 
-      // e.g. /shorts/VIDEO_ID
+      // /shorts/VIDEO_ID
       if (u.pathname.startsWith("/shorts/")) {
         return u.pathname.split("/")[2] ?? null;
       }
@@ -251,16 +250,15 @@ async function fetchYouTubeTranscript(
 
     if (!fullTranscript) return;
 
-    // Keep it sane for context (models don't need entire hour-long transcript)
-    return fullTranscript.slice(0, 6000); // ~6k chars as a soft cap
+    // 6000 character cap for transcripts for speed purposes
+    return fullTranscript.slice(0, 6000);
   } catch (err) {
     console.warn("Error fetching YouTube transcript for", url, err);
     return;
   }
 }
 
-// --- Metadata scraper for links (title/description) ---
-
+// Metadata scraper for links: title and description
 async function fetchLinkSummary(url: string): Promise<LinkSummary | null> {
   try {
     const res = await fetch(url, {
@@ -311,7 +309,7 @@ async function fetchLinkSummary(url: string): Promise<LinkSummary | null> {
   }
 }
 
-// Builds rich link summaries including transcripts where possible
+// Builds link summaries and transcripts where possible
 async function buildLinkSummaries(urls: string[]): Promise<LinkSummary[]> {
   const metaResults = await Promise.all(urls.map((u) => fetchLinkSummary(u)));
 
@@ -332,10 +330,9 @@ async function buildLinkSummaries(urls: string[]): Promise<LinkSummary[]> {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const incoming = (body?.messages ?? []) as SimpleMessage[];
+    const incoming = (body?.messages ?? []) as Message[];
 
-    // ✅ default to Claude
-    const provider = (body?.provider ?? "claude") as "openai" | "claude";
+    const provider = (body?.provider ?? "openai") as Provider;
 
     const contentLinks: string[] = Array.isArray(body?.contentLinks)
       ? body.contentLinks
@@ -373,10 +370,9 @@ export async function POST(req: NextRequest) {
       contentDocs.map((d) => d.name)
     );
 
-    // Fetch summaries for a few links (to keep prompt size reasonable)
     let linkSummaries: LinkSummary[] = [];
     if (contentLinks.length > 0) {
-      // Use the *most recent* links so users feel their last paste actually matters
+      // Use the most recent links so users feel their last pastes actually matter
       const MAX_LINKS = 10;
       const limited = contentLinks.slice(-MAX_LINKS);
 
@@ -385,97 +381,92 @@ export async function POST(req: NextRequest) {
 
     const linksContext =
       linkSummaries.length > 0
-        ? `
-The user has provided these source content links (ads, videos, sales pages, etc.).
-Treat them as reference material for structure, tone, and messaging:
+        ? `The user has provided these source content links (ads, videos, sales pages, etc.). Treat them as reference material for structure, tone, and messaging:
+      ${linkSummaries
+        .map((s) => {
+          const title = s.title ? `Title: "${s.title}"` : "Title: (unknown)";
+          const desc = s.description
+            ? `Summary: ${s.description.slice(0, 300)}`
+            : "Summary: (no description available)";
+          const transcriptSnippet = s.transcript
+            ? `Transcript snippet: ${s.transcript.slice(0, 1200)}`
+            : "Transcript: (not available or not fetched)";
 
-${linkSummaries
-  .map((s) => {
-    const title = s.title ? `Title: "${s.title}"` : "Title: (unknown)";
-    const desc = s.description
-      ? `Summary: ${s.description.slice(0, 300)}`
-      : "Summary: (no description available)";
-    const transcriptSnippet = s.transcript
-      ? `Transcript snippet: ${s.transcript.slice(0, 1200)}`
-      : "Transcript: (not available or not fetched)";
+          return `- URL: ${s.url}
+        ${title}
+        ${desc}
+        ${transcriptSnippet}`;
+        })
+        .join("\n\n")}
 
-    return `- URL: ${s.url}
-  ${title}
-  ${desc}
-  ${transcriptSnippet}`;
-  })
-  .join("\n\n")}
-
-Use these to:
-- Infer the style, tone, and structure of the user's best-performing ads or content.
-- Generate new hooks, angles, and copy that *feel* similar, but adapted to whatever product / avatar / channel they describe.
-- When helpful, explicitly say things like:
-  "I'm mirroring the style of your ad titled '...'"
-Do NOT pretend you've watched the full videos; rely on titles, descriptions, and transcript snippets.
-`
+      Use these to:
+      - Infer the style, tone, and structure of the user's best-performing ads or content.
+      - Generate new hooks, angles, and copy that *feel* similar, but adapted to whatever product / avatar / channel they describe.
+      - When helpful, explicitly say things like:
+        "I'm mirroring the style of your ad titled '...'"
+      Do NOT pretend you've watched the full videos; rely on titles, descriptions, and transcript snippets.
+      `
         : contentLinks.length > 0
         ? `
-The user has shared these content links, but we couldn't fetch titles/descriptions:
+      The user has shared these content links, but we couldn't fetch titles/descriptions:
 
-${contentLinks.map((l: string) => `- ${l}`).join("\n")}
+      ${contentLinks.map((l: string) => `- ${l}`).join("\n")}
 
-Still treat them as part of their "source content brain". Speak conceptually:
-- Help them think of these as their best-performing ads / emails / videos.
-- Ask them which ones perform best and what they like about them.
-- Generate copy that *could* match those styles.
-`
+      Still treat them as part of their "source content brain". Speak conceptually:
+      - Help them think of these as their best-performing ads / emails / videos.
+      - Ask them which ones perform best and what they like about them.
+      - Generate copy that *could* match those styles.
+      `
         : `
-The user has not added any content links yet.
-Gently encourage them to paste links to:
-- Their best-performing ads
-- Sales pages
-- YouTube / Instagram / TikTok content
-Explain that Poppy will use those as reference to generate new hooks, scripts, and copy in a similar style.
-`;
+      The user has not added any content links yet.
+      Gently encourage them to paste links to:
+      - Their best-performing ads
+      - Sales pages
+      - YouTube / Instagram / TikTok content
+      Explain that Poppy will use those as reference to generate new hooks, scripts, and copy in a similar style.
+      `;
 
     const docsContext =
       contentDocs.length > 0
-        ? `
-The user has also uploaded text documents that describe their audience, pain points, benefits, or existing copy. Use them heavily as context.
+        ? `The user has also uploaded text documents that describe their audience, pain points, benefits, or existing copy. Use them heavily as context.
 
-Here are the latest documents with excerpts:
+      Here are the latest documents with excerpts:
 
-${contentDocs
-  .map((d) => {
-    const excerpt = d.text.replace(/\s+/g, " ").slice(0, 1500);
-    return `- Document: "${d.name}"
-  Excerpt: ${excerpt}`;
-  })
-  .join("\n\n")}
+      ${contentDocs
+        .map((d) => {
+          const excerpt = d.text.replace(/\s+/g, " ").slice(0, 1500);
+          return `- Document: "${d.name}"
+        Excerpt: ${excerpt}`;
+        })
+        .join("\n\n")}
 
-When generating hooks, scripts, and ad copy:
-- Use the language and phrasing you see in these documents.
-- Reflect the pain points, desires, and positioning you detect here.
-- Treat them as "inside the brand brain" – not external sources.
-`
+      When generating hooks, scripts, and ad copy:
+      - Use the language and phrasing you see in these documents.
+      - Reflect the pain points, desires, and positioning you detect here.
+      - Treat them as "inside the brand brain" – not external sources.
+      `
         : `
-The user has not uploaded any text documents yet.
-If relevant, suggest they upload .txt/.md files with:
-- ICP descriptions
-- Pain points
-- Benefits
-- Existing winning emails or ads
-You will then be able to mirror that language and structure more precisely.
-`;
+      The user has not uploaded any text documents yet.
+      If relevant, suggest they upload .txt/.md files with:
+      - ICP descriptions
+      - Pain points
+      - Benefits
+      - Existing winning emails or ads
+      You will then be able to mirror that language and structure more precisely.
+      `;
 
-    const toolsContext = `
-Tool available:
-- export_poppy_summary_to_google_doc:
-  * Call this ONLY if the user clearly asks to export/save/send their plan, hooks, summary, or next steps to Google Docs.
-  * When calling the tool, choose a descriptive title (use the project name or what they're exporting) and craft Markdown content that includes the relevant pieces (hooks, high-level goal, step-by-step plan, next 3 moves, etc.).
-  * The tool returns { "docUrl": "https://docs.google.com/..." }.
-  * Do NOT call it unless they explicitly want a Google Doc export.
-`;
+    const toolsContext = `Tool available:
+      - export_poppy_summary_to_google_doc:
+        * Call this ONLY if the user clearly asks to export/save/send their plan, hooks, summary, or next steps to Google Docs.
+        * When calling the tool, choose a descriptive title (use the project name or what they're exporting) and craft Markdown content that includes the relevant pieces (hooks, high-level goal, step-by-step plan, next 3 moves, etc.).
+        * The tool returns { "docUrl": "https://docs.google.com/..." }.
+        * Do NOT call it unless they explicitly want a Google Doc export.
+      `;
 
     const fullSystem =
       SYSTEM_PROMPT + linksContext + docsContext + toolsContext;
 
-    // 🔁 Call the model (Claude or OpenAI) with tools enabled
+    // Call the model (OpenAI OR Claude) with tools enabled
     let result: any;
 
     if (provider === "claude") {
@@ -488,7 +479,7 @@ Tool available:
         })),
         tools: poppyTools,
         maxSteps: 3,
-      });
+      } as any);
     } else {
       result = await generateText({
         model: openai("gpt-4.1-mini"),
@@ -499,7 +490,7 @@ Tool available:
         })),
         tools: poppyTools,
         maxSteps: 3,
-      });
+      } as any);
     }
 
     const { text, toolResults } = result;
@@ -512,8 +503,7 @@ Tool available:
       JSON.stringify(toolResults, null, 2)
     );
 
-    // 🧠 If the model only called the export tool and never spoke,
-    // build a friendly reply using the tool result.
+    // If the model only called the export tool and never spoke, build a friendly reply using the tool result
     if (!replyText && Array.isArray(toolResults) && toolResults.length) {
       const exportResult = toolResults.find(
         (tr: any) => tr.toolName === "export_poppy_summary_to_google_doc"
@@ -524,9 +514,7 @@ Tool available:
       if (exportResult) {
         const r = (exportResult as any).result;
 
-        // Handle both shapes:
-        // - result: "https://docs.google.com/..."
-        // - result: { docUrl: "https://docs.google.com/..." }
+        // Handle both shapes: (result: "https://docs.google.com/...") and (result: { docUrl: "https://docs.google.com/..." })
         if (typeof r === "string") {
           docUrl = r;
         } else if (r && typeof r === "object" && typeof r.docUrl === "string") {
@@ -534,30 +522,26 @@ Tool available:
         }
       }
 
-      // Backup: if for some reason toolResults didn't carry it,
-      // fall back to what MCP just returned.
+      // If for some reason toolResults didn't carry it, fall back to what MCP just returned
       if (!docUrl && typeof lastExportDocUrl === "string") {
         docUrl = lastExportDocUrl;
       }
 
       if (docUrl) {
-        // ✅ SUCCESS CASE
         replyText = `I exported to Google Doc and here is the link: ${docUrl}`;
       } else {
-        // ❌ FAILURE CASE
         replyText =
           "Sorry, I can not export to Google Doc at this time. Please try the export links in the top right corner of the screen instead.";
       }
     }
 
-    // Final safety net: never send an empty reply
+    // Last resort: never send an empty reply
     if (!replyText.trim()) {
       replyText =
         "I did some work behind the scenes but wasn’t sure what to say back. Tell me what you want next and I’ll help.";
     }
 
     return Response.json({ reply: replyText });
-
   } catch (err) {
     console.error("poppy-chat error", err);
     return new Response(

@@ -10,6 +10,7 @@ type OrbVisualizerProps = {
   pendingTranscript: string;
   showPendingTranscript: boolean;
   isListening: boolean;
+  isPartyMode: boolean;
   onToggleListening: () => void;
   orbCanvasRef: RefObject<HTMLCanvasElement>;
   poppyImageRef: RefObject<HTMLDivElement>;
@@ -22,6 +23,7 @@ export default function OrbVisualizer({
   pendingTranscript,
   showPendingTranscript,
   isListening,
+  isPartyMode,
   onToggleListening,
   orbCanvasRef,
   poppyImageRef,
@@ -29,15 +31,35 @@ export default function OrbVisualizer({
   return (
     <>
       <div
-        className="relative w-52 h-52 md:w-72 md:h-72 flex items-center justify-center cursor-pointer"
+        className={`relative w-52 h-52 md:w-72 md:h-72 flex items-center justify-center cursor-pointer rounded-full ${
+          isPartyMode ? "party-border-glow border border-[#F2E8DC]/50" : ""
+        }`}
         onClick={onToggleListening}
       >
+        {isPartyMode && (
+          <div className="pointer-events-none absolute inset-0 overflow-visible">
+            {["#7E84F2", "#F27979", "#F2E8DC"].map((color, index) => (
+              <div
+                key={color}
+                className="absolute h-1.5 w-1.5 rounded-full party-float"
+                style={{
+                  backgroundColor: color,
+                  left: `${25 + index * 20}%`,
+                  top: `${15 + index * 25}%`,
+                  animationDelay: `${index * 1.2}s`,
+                }}
+              />
+            ))}
+          </div>
+        )}
         <div
           className={`
             absolute inset-0 rounded-full blur-3xl
             transition-all duration-700
             ${
-              orbState === "listening"
+              isPartyMode
+                ? "bg-[conic-gradient(from_0deg,#7E84F2,#F27979,#F2E8DC,#7E84F2)] opacity-80 mix-blend-screen animate-[spin_12s_linear_infinite]"
+                : orbState === "listening"
                 ? "bg-[#7E84F2]/60"
                 : orbState === "speaking"
                 ? "bg-[#F27979]/60"
@@ -57,14 +79,11 @@ export default function OrbVisualizer({
           "
         />
         <div
-          className="
-            relative rounded-full w-36 h-36 md:w-60 md:h-60
-            flex items-center justify-center
-            border
-            bg-[radial-gradient(circle_at_25%_20%,#F2E8DC33,transparent_55%),radial-gradient(circle_at_80%_80%,#F2797944,transparent_60%),radial-gradient(circle_at_50%_50%,#150140,#7E84F2)]
-            shadow-[0_0_80px_rgba(126,132,242,0.9)]
-            transition-transform duration-500
-          "
+          className={`relative rounded-full w-36 h-36 md:w-60 md:h-60 flex items-center justify-center border transition-transform duration-500 ${
+            isPartyMode
+              ? "bg-[radial-gradient(circle_at_30%_20%,#F2E8DC66,transparent_65%),radial-gradient(circle_at_80%_80%,#F27979AA,transparent_75%),radial-gradient(circle_at_50%_50%,#150140,#7E84F2)] shadow-[0_0_100px_rgba(242,121,121,0.7)] party-orb-pulse"
+              : "bg-[radial-gradient(circle_at_25%_20%,#F2E8DC33,transparent_55%),radial-gradient(circle_at_80%_80%,#F2797944,transparent_60%),radial-gradient(circle_at_50%_50%,#150140,#7E84F2)] shadow-[0_0_80px_rgba(126,132,242,0.9)]"
+          }`}
           style={innerOrbStyle}
         >
           <div className="absolute inset-3 md:inset-5 pointer-events-none">

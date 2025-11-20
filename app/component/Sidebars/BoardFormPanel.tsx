@@ -1,30 +1,7 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
-
-type BoardDocInput = {
-  name: string;
-  text: string;
-};
-
-type ExistingBoardDoc = {
-  id: string;
-  name: string;
-  text: string;
-};
-
-type Board = {
-  id: string;
-  title: string;
-  description: string;
-  links: string[];
-  docs: ExistingBoardDoc[];
-};
-
-type ContentDoc = {
-  name: string;
-  text: string;
-};
+import type { BoardDocInput, Board, ContentDoc } from "../../types";
 
 type BoardFormPanelProps = {
   className?: string;
@@ -117,9 +94,9 @@ export default function BoardFormPanel({
     <div
       className={`bg-[#150140]/40 border border-[#7E84F2]/20 rounded-2xl p-3 md:p-4 space-y-4 ${className}`}
     >
-      <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
+      <div className="space-y-3 border-[#7E84F2]/20">
         <p className="text-xs md:text-sm text-[#F2E8DC]/80">
-          Build <strong>Boards</strong> from these assets (name and
+          Build <strong>Boards</strong> from these assets (title and
           board-specific links/files), then save them for quick recall later.
         </p>
 

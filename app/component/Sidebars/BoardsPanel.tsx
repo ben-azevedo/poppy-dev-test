@@ -1,27 +1,7 @@
 "use client";
 
 import { useState, ChangeEvent } from "react";
-
-type BoardDoc = {
-  id: string;
-  name: string;
-  text: string;
-};
-
-type Board = {
-  id: string;
-  title: string;
-  description: string;
-  links: string[];
-  docs: BoardDoc[];
-};
-
-type SavedChat = {
-  id: string;
-  title: string;
-  savedAt: number;
-  messages: { role: "user" | "assistant"; content: string }[];
-};
+import type { Board, SavedChat } from "../../types";
 
 type BoardsPanelProps = {
   className?: string;
@@ -451,7 +431,7 @@ export default function BoardsPanel({
     >
       <div className="space-y-2 border-[#7E84F2]/20">
         <p className="text-[11px] text-[#F2E8DC]/60 uppercase tracking-wide">
-          Boards
+          My Boards
         </p>
         {renderBoardsList()}
       </div>
@@ -459,7 +439,7 @@ export default function BoardsPanel({
       <div className="space-y-3 border-t border-[#7E84F2]/20 pt-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] text-[#F2E8DC]/60 uppercase tracking-wide">
-            Saved chats
+            My Chats
           </p>
           <button
             onClick={onSaveChat}

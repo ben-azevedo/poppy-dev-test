@@ -1,4 +1,3 @@
-// mcp-server.ts
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
@@ -10,8 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { google } from "googleapis";
 
-// ---- Google Docs helper ----
-
+// Google Docs helper
 function createOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -38,7 +36,7 @@ async function createGoogleDoc(title: string, content: string) {
   const auth = createOAuthClient();
   const docs = google.docs({ version: "v1", auth });
 
-  // 1️⃣ Create doc
+  // Create doc
   const created = await docs.documents.create({
     requestBody: {
       title,
@@ -47,10 +45,10 @@ async function createGoogleDoc(title: string, content: string) {
 
   const documentId = created.data.documentId;
   if (!documentId) {
-    throw new Error("Google Docs API did not return a documentId");
+    throw new Error("Google Docs API did not return documentId");
   }
 
-  // 2️⃣ Insert content
+  // Insert content
   await docs.documents.batchUpdate({
     documentId,
     requestBody: {
@@ -71,10 +69,8 @@ async function createGoogleDoc(title: string, content: string) {
   return docUrl;
 }
 
-// ---- MCP server setup ----
-
-// NOTE: this is the *low-level* Server, not the McpServer helper.
-// We manually handle tools/list and tools/call.
+// MCP server setup
+// This is the low-level Server, not the McpServer helper. Manually handle tools/list and tools/call.
 const server = new Server(
   {
     name: "poppy-google-docs",
@@ -87,7 +83,8 @@ const server = new Server(
   }
 );
 
-// tools/list → tell clients what tools exist
+// tools/list
+// tell clients what tools exist
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -116,7 +113,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// tools/call → actually run the tool
+// tools/call
+// actually run the tool
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
@@ -187,8 +185,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// ---- stdio bootstrap ----
-
+// stdio bootstrap
 async function main() {
   console.log("🚀 Starting Poppy Google Docs MCP server (stdio)...");
   const transport = new StdioServerTransport();
