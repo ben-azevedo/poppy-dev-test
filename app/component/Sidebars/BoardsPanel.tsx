@@ -195,7 +195,10 @@ export default function BoardsPanel({
                         onClick={() => {
                           if (
                             editingBoardId &&
-                            addLinkToBoard(editingBoardId, editingBoardLinkInput)
+                            addLinkToBoard(
+                              editingBoardId,
+                              editingBoardLinkInput
+                            )
                           ) {
                             setEditingBoardLinkInput("");
                           }
@@ -212,7 +215,6 @@ export default function BoardsPanel({
                             key={link}
                             className="inline-flex items-center gap-1 rounded-full bg-[#050505] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[140px] truncate"
                           >
-                            {getLinkDisplayLabel(link)}
                             <button
                               onClick={() =>
                                 removeLinkFromBoard(board.id, link)
@@ -221,6 +223,7 @@ export default function BoardsPanel({
                             >
                               ✕
                             </button>
+                            {getLinkDisplayLabel(link)}
                           </span>
                         ))}
                       </div>
@@ -248,13 +251,15 @@ export default function BoardsPanel({
                             key={doc.id}
                             className="inline-flex items-center gap-1 rounded-full bg-[#050505] border border-[#7E84F2]/40 px-2 py-0.5 text-[10px] text-[#F2E8DC]/80 max-w-[140px] truncate"
                           >
-                            {doc.name}
                             <button
-                              onClick={() => removeDocFromBoard(board.id, doc.id)}
+                              onClick={() =>
+                                removeDocFromBoard(board.id, doc.id)
+                              }
                               className="text-[#F2E8DC]/60 hover:text-[#F2E8DC]"
                             >
                               ✕
                             </button>
+                            {doc.name}
                           </span>
                         ))}
                       </div>

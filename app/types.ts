@@ -1,7 +1,7 @@
 export type Provider = "openai" | "claude";
 
 export type Message = {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   provider?: Provider;
 };
@@ -36,3 +36,4 @@ export type SavedChat = {
   savedAt: number;
   messages: Message[];
 };
+

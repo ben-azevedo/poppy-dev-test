@@ -5,12 +5,11 @@ import BoardsPanel from "./component/Sidebars/BoardsPanel";
 import BoardFormPanel from "./component/Sidebars/BoardFormPanel";
 import useOrbVisualizer from "./component/useOrbVisualizer";
 import useLinkMetadataCache from "./component/useLinkMetadataCache";
-import useLocalStorageBoards from "./component/useLocalStorageBoards";
-import useLocalStorageChats from "./component/useLocalStorageChats";
 import useSpeechRecognition from "./component/useSpeechRecognition";
 import HomeMainLayout from "./component/HomeMainLayout";
 import OrbExperienceSection from "./component/OrbExperienceSection";
 import ChatColumn from "./component/ChatColumn";
+import { SignedIn, SignedOut, UserButton, SignInButton, useAuth } from "@clerk/nextjs";
 import {
   getTypingDelayForChar,
   computeBaseTypingDelay,
@@ -27,19 +26,15 @@ import type {
 } from "./types";
 
 export default function Home() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [showOrb, setShowOrb] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isPartyMode, setIsPartyMode] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [provider, setProvider] = useState<Provider>("openai"); // Engine
   const [isMuted, setIsMuted] = useState(false);
   const [contentLinks, setContentLinks] = useState<string[]>([]); // Content onboarding state
   const [contentDocs, setContentDocs] = useState<ContentDoc[]>([]);
-  const [selectedBoardIds, setSelectedBoardIds] = useState<string[]>([]);
-  const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
-    null
-  );
   const [poppyVoice, setPoppyVoice] = useState<SpeechSynthesisVoice | null>(
     null
   ); // Single chosen voice for Poppy
@@ -54,8 +49,13 @@ export default function Home() {
   const typingControllerRef = useRef<{ cancel: () => void } | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null); // Scroll container ref
 
-  const { boards, setBoards } = useLocalStorageBoards();
-  const { savedChats, setSavedChats } = useLocalStorageChats();
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [selectedBoardIds, setSelectedBoardIds] = useState<string[]>([]);
+  const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
+  const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
+    null
+  );
+  const [messages, setMessages] = useState<Message[]>([]);
   const {
     isSupported: isSpeechSupported,
     isListening,
@@ -84,6 +84,39 @@ export default function Home() {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  // Load boards and saved chats from backend on mount
+  useEffect(() => {
+    // Wait until Clerk has loaded and the user is signed in
+    if (!isLoaded || !isSignedIn) return;
+
+    const loadInitialData = async () => {
+      try {
+        const [boardsRes, chatsRes] = await Promise.all([
+          fetch("/api/boards"),
+          fetch("/api/saved-chats"),
+        ]);
+
+        if (boardsRes.ok) {
+          const boardsData: Board[] = await boardsRes.json();
+          setBoards(boardsData);
+          if (boardsData.length && selectedBoardIds.length === 0) {
+            setSelectedBoardIds([boardsData[0].id]);
+          }
+        }
+
+        if (chatsRes.ok) {
+          const chatsData: SavedChat[] = await chatsRes.json();
+          setSavedChats(chatsData);
+        }
+      } catch (err) {
+        console.error("Failed to load initial data", err);
+      }
+    };
+
+    loadInitialData();
+  }, [isLoaded, isSignedIn]);
+
 
   // Picks a stable voice for Poppy once voices are available
   useEffect(() => {
@@ -659,12 +692,6 @@ export default function Home() {
     selectedBoards.length > 0 &&
     (contentLinks.length > 0 || contentDocs.length > 0);
 
-  const updateBoard = (boardId: string, updater: (board: Board) => Board) => {
-    setBoards((prev) =>
-      prev.map((board) => (board.id === boardId ? updater(board) : board))
-    );
-  };
-
   const attachDocsToBoard = (boardId: string, files: FileList | null) => {
     if (!files?.length) return;
 
@@ -746,7 +773,7 @@ export default function Home() {
     return uploads;
   };
 
-  const handleCreateBoard = ({
+  const handleCreateBoard = async ({
     title,
     description,
     links,
@@ -766,25 +793,64 @@ export default function Home() {
       alert("Add at least one link or file before creating a board.");
       return;
     }
-    const newBoard: Board = {
-      id: generateId(),
-      title: trimmedTitle,
-      description: description.trim(),
-      links: [...links],
-      docs: docs.map((doc) => ({
-        id: generateId(),
-        name: doc.name,
-        text: doc.text,
-      })),
-    };
-    setBoards((prev) => [newBoard, ...prev]);
-    setSelectedBoardIds((prev) => [
-      newBoard.id,
-      ...prev.filter((id) => id !== newBoard.id),
-    ]);
+
+    try {
+      const res = await fetch("/api/boards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: trimmedTitle,
+          description: description.trim(),
+          links,
+          docs,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error("Failed to create board", await res.text());
+        alert("Something went wrong saving this board.");
+        return;
+      }
+
+      const created: Board = await res.json();
+
+      setBoards((prev) => [created, ...prev]);
+      setSelectedBoardIds((prev) => [
+        created.id,
+        ...prev.filter((id) => id !== created.id),
+      ]);
+    } catch (err) {
+      console.error("Failed to create board", err);
+      alert("Something went wrong saving this board.");
+    }
   };
 
-  const handleDeleteBoard = (boardId: string) => {
+  const updateBoard = (boardId: string, updater: (board: Board) => Board) => {
+    setBoards((prev) => {
+      const existing = prev.find((b) => b.id === boardId);
+      if (!existing) return prev;
+
+      const updated = updater(existing);
+
+      // fire-and-forget to backend
+      fetch(`/api/boards/${boardId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: updated.title,
+          description: updated.description,
+          links: updated.links,
+          docs: updated.docs,
+        }),
+      }).catch((err) => {
+        console.error("Failed to update board", err);
+      });
+
+      return prev.map((b) => (b.id === boardId ? updated : b));
+    });
+  };
+
+  const handleDeleteBoard = async (boardId: string) => {
     setBoards((prev) => {
       const next = prev.filter((b) => b.id !== boardId);
       setSelectedBoardIds((current) => {
@@ -794,26 +860,51 @@ export default function Home() {
       });
       return next;
     });
+
+    try {
+      const res = await fetch(`/api/boards/${boardId}`, { method: "DELETE" });
+      if (!res.ok) {
+        console.error("Failed to delete board", await res.text());
+      }
+    } catch (err) {
+      console.error("Failed to delete board", err);
+    }
   };
 
-  const handleSaveCurrentChat = () => {
+  const handleSaveCurrentChat = async () => {
     const currentMessages = messagesRef.current;
     if (!currentMessages.length) return;
-    const timestamp = Date.now();
+
     const firstUserLine =
       currentMessages.find((m) => m.role === "user")?.content.trim() ?? "";
     const preview =
       firstUserLine.length > 40
         ? `${firstUserLine.slice(0, 40)}…`
         : firstUserLine || "Chat notes";
-    const newChat: SavedChat = {
-      id: generateId(),
-      title: preview,
-      savedAt: timestamp,
-      messages: currentMessages.map((m) => ({ ...m })),
-    };
-    setSavedChats((prev) => [newChat, ...prev]);
-    setSelectedSavedChatId(newChat.id);
+
+    try {
+      const res = await fetch("/api/saved-chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: preview,
+          messages: currentMessages,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error("Failed to save chat", await res.text());
+        alert("Couldn't save this chat.");
+        return;
+      }
+
+      const saved: SavedChat = await res.json();
+      setSavedChats((prev) => [saved, ...prev]);
+      setSelectedSavedChatId(saved.id);
+    } catch (err) {
+      console.error("Failed to save chat", err);
+      alert("Couldn't save this chat.");
+    }
   };
 
   const handleSelectSavedChat = (chatId: string) => {
@@ -828,34 +919,57 @@ export default function Home() {
       alert("Select at least one board to save.");
       return;
     }
+
     const nextLinks = [...contentLinksRef.current];
     const nextDocs: BoardDoc[] = contentDocsRef.current.map((doc) => ({
       id: generateId(),
       name: doc.name,
       text: doc.text,
     }));
-    setBoards((prev) =>
-      prev.map((board) =>
-        selectedBoardIds.includes(board.id)
-          ? {
-              ...board,
-              links: nextLinks,
-              docs: nextDocs,
-            }
-          : board
-      )
-    );
+
+    selectedBoardIds.forEach((boardId) => {
+      updateBoard(boardId, (board) => ({
+        ...board,
+        links: nextLinks,
+        docs: nextDocs,
+      }));
+    });
   };
 
-  const handleDeleteSavedChat = (chatId: string) => {
+
+  const handleDeleteSavedChat = async (chatId: string) => {
     setSavedChats((prev) => prev.filter((chat) => chat.id !== chatId));
     setSelectedSavedChatId((prev) => (prev === chatId ? null : prev));
+
+    try {
+      const res = await fetch(`/api/saved-chats/${chatId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        console.error("Failed to delete saved chat", await res.text());
+      }
+    } catch (err) {
+      console.error("Failed to delete saved chat", err);
+    }
   };
 
-  const handleRenameSavedChat = (chatId: string, title: string) => {
+  const handleRenameSavedChat = async (chatId: string, title: string) => {
     setSavedChats((prev) =>
       prev.map((chat) => (chat.id === chatId ? { ...chat, title } : chat))
     );
+
+    try {
+      const res = await fetch(`/api/saved-chats/${chatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        console.error("Failed to rename saved chat", await res.text());
+      }
+    } catch (err) {
+      console.error("Failed to rename saved chat", err);
+    }
   };
 
   // Handle exporting
@@ -962,7 +1076,10 @@ export default function Home() {
     return { title, content: lines.join("\n") };
   };
 
-  const openDocOrAlert = (docUrl: string | undefined, missingMessage: string) => {
+  const openDocOrAlert = (
+    docUrl: string | undefined,
+    missingMessage: string
+  ) => {
     if (docUrl) {
       window.open(docUrl, "_blank");
     } else {
@@ -1106,19 +1223,41 @@ export default function Home() {
   );
 
   return (
-    <HomeMainLayout
-      showOrb={showOrb}
-      provider={provider}
-      isMuted={isMuted}
-      onProviderChange={handleSetProvider}
-      onToggleMute={handleToggleMute}
-      onStartExperience={handleStartExperience}
-      onExportText={handleExportTextFile}
-      onExportGoogleDoc={handleExportGoogleDoc}
-      onExportGoogleDocViaMcp={handleExportGoogleDocViaMcp}
-      orbExperience={orbExperience}
-      isPartyMode={isPartyMode}
-      onTogglePartyMode={handleTogglePartyMode}
-    />
+    <>
+      <SignedOut>
+        <div className="min-h-screen flex items-center justify-center bg-black text-white">
+          <div className="space-y-4 text-center">
+            <h1 className="text-xl font-semibold">Welcome to Poppy</h1>
+            <p className="text-sm text-gray-300">
+              Sign in to start chatting and save your boards & conversations.
+            </p>
+            <SignInButton mode="modal">
+              <button className="rounded-full px-6 py-2 text-sm font-semibold bg-white text-black hover:bg-gray-200 transition">
+                Sign in with Clerk
+              </button>
+            </SignInButton>
+          </div>
+        </div>
+      </SignedOut>
+      <SignedIn>
+        <header className="flex justify-end p-4">
+          <UserButton />
+        </header>
+        <HomeMainLayout
+          showOrb={showOrb}
+          provider={provider}
+          isMuted={isMuted}
+          onProviderChange={handleSetProvider}
+          onToggleMute={handleToggleMute}
+          onStartExperience={handleStartExperience}
+          onExportText={handleExportTextFile}
+          onExportGoogleDoc={handleExportGoogleDoc}
+          onExportGoogleDocViaMcp={handleExportGoogleDocViaMcp}
+          orbExperience={orbExperience}
+          isPartyMode={isPartyMode}
+          onTogglePartyMode={handleTogglePartyMode}
+        />
+      </SignedIn>
+    </>
   );
 }
