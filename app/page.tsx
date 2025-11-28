@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import BoardsPanel from "./component/Sidebars/BoardsPanel";
 import BoardFormPanel from "./component/Sidebars/BoardFormPanel";
-import useOrbVisualizer from "./component/useOrbVisualizer";
-import useLinkMetadataCache from "./component/useLinkMetadataCache";
-import useSpeechRecognition from "./component/useSpeechRecognition";
+import useOrbVisualizer from "./hook/useOrbVisualizer";
+import useLinkMetadataCache from "./hook/useLinkMetadataCache";
+import useSpeechRecognition from "./hook/useSpeechRecognition";
 import HomeMainLayout from "./component/HomeMainLayout";
 import OrbExperienceSection from "./component/OrbExperienceSection";
 import ChatColumn from "./component/ChatColumn";
+import { useFirebaseUser } from "./hook/useFirebaseUser";
+import { useBoardsRealtime } from "./hook/useBoardsRealtime";
 import { SignedIn, SignedOut, UserButton, SignInButton, useAuth } from "@clerk/nextjs";
 import {
   getTypingDelayForChar,
@@ -27,6 +29,7 @@ import type {
 
 export default function Home() {
   const { isLoaded, isSignedIn } = useAuth();
+  const { ready: firebaseReady, userId } = useFirebaseUser();
   const [showOrb, setShowOrb] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isPartyMode, setIsPartyMode] = useState(false);
@@ -49,7 +52,7 @@ export default function Home() {
   const typingControllerRef = useRef<{ cancel: () => void } | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null); // Scroll container ref
 
-  const [boards, setBoards] = useState<Board[]>([]);
+  const boards = useBoardsRealtime({ firebaseReady, userId });
   const [selectedBoardIds, setSelectedBoardIds] = useState<string[]>([]);
   const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
   const [selectedSavedChatId, setSelectedSavedChatId] = useState<string | null>(
@@ -85,25 +88,14 @@ export default function Home() {
     isMutedRef.current = isMuted;
   }, [isMuted]);
 
-  // Load boards and saved chats from backend on mount
+  // Load saved chats from backend on mount
   useEffect(() => {
     // Wait until Clerk has loaded and the user is signed in
     if (!isLoaded || !isSignedIn) return;
 
     const loadInitialData = async () => {
       try {
-        const [boardsRes, chatsRes] = await Promise.all([
-          fetch("/api/boards"),
-          fetch("/api/saved-chats"),
-        ]);
-
-        if (boardsRes.ok) {
-          const boardsData: Board[] = await boardsRes.json();
-          setBoards(boardsData);
-          if (boardsData.length && selectedBoardIds.length === 0) {
-            setSelectedBoardIds([boardsData[0].id]);
-          }
-        }
+        const chatsRes = await fetch("/api/saved-chats");
 
         if (chatsRes.ok) {
           const chatsData: SavedChat[] = await chatsRes.json();
@@ -116,6 +108,13 @@ export default function Home() {
 
     loadInitialData();
   }, [isLoaded, isSignedIn]);
+
+  // Auto-select first board when boards arrive
+  useEffect(() => {
+    if (boards.length > 0 && selectedBoardIds.length === 0) {
+      setSelectedBoardIds([boards[0].id]);
+    }
+  }, [boards, selectedBoardIds]);
 
 
   // Picks a stable voice for Poppy once voices are available
@@ -814,26 +813,26 @@ export default function Home() {
 
       const created: Board = await res.json();
 
-      setBoards((prev) => [created, ...prev]);
-      setSelectedBoardIds((prev) => [
-        created.id,
-        ...prev.filter((id) => id !== created.id),
-      ]);
+      setSelectedBoardIds((prev) =>
+        prev.includes(created.id) ? prev : [created.id, ...prev]
+      );
     } catch (err) {
       console.error("Failed to create board", err);
       alert("Something went wrong saving this board.");
     }
   };
 
-  const updateBoard = (boardId: string, updater: (board: Board) => Board) => {
-    setBoards((prev) => {
-      const existing = prev.find((b) => b.id === boardId);
-      if (!existing) return prev;
+  const updateBoard = async (
+    boardId: string,
+    updater: (board: Board) => Board
+  ) => {
+    const existing = boards.find((b) => b.id === boardId);
+    if (!existing) return;
 
-      const updated = updater(existing);
+    const updated = updater(existing);
 
-      // fire-and-forget to backend
-      fetch(`/api/boards/${boardId}`, {
+    try {
+      const res = await fetch(`/api/boards/${boardId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -842,32 +841,42 @@ export default function Home() {
           links: updated.links,
           docs: updated.docs,
         }),
-      }).catch((err) => {
-        console.error("Failed to update board", err);
       });
 
-      return prev.map((b) => (b.id === boardId ? updated : b));
-    });
+      if (!res.ok) {
+        console.error("Failed to update board", await res.text());
+        alert("I couldn't update that board, try again?");
+      }
+      // Firestore will pull in the new board data
+    } catch (err) {
+      console.error("Failed to update board", err);
+      alert("Something went wrong while updating your board.");
+    }
   };
 
   const handleDeleteBoard = async (boardId: string) => {
-    setBoards((prev) => {
-      const next = prev.filter((b) => b.id !== boardId);
-      setSelectedBoardIds((current) => {
-        const filtered = current.filter((id) => id !== boardId);
-        if (filtered.length > 0 || next.length === 0) return filtered;
-        return next[0] ? [next[0].id] : [];
-      });
-      return next;
-    });
+    if (
+      !confirm("Delete this board? I won't remember its links or docs anymore.")
+    ) {
+      return;
+    }
 
     try {
-      const res = await fetch(`/api/boards/${boardId}`, { method: "DELETE" });
+      const res = await fetch(`/api/boards/${boardId}`, {
+        method: "DELETE",
+      });
+
       if (!res.ok) {
         console.error("Failed to delete board", await res.text());
+        alert("I couldn't delete that board, try again?");
+        return;
       }
+
+      // Remove from selection, Firestore will remove it from boards
+      setSelectedBoardIds((current) => current.filter((id) => id !== boardId));
     } catch (err) {
       console.error("Failed to delete board", err);
+      alert("Something went wrong while deleting your board.");
     }
   };
 
@@ -1240,23 +1249,38 @@ export default function Home() {
         </div>
       </SignedOut>
       <SignedIn>
-        <header className="flex justify-end p-4">
-          <UserButton />
-        </header>
-        <HomeMainLayout
-          showOrb={showOrb}
-          provider={provider}
-          isMuted={isMuted}
-          onProviderChange={handleSetProvider}
-          onToggleMute={handleToggleMute}
-          onStartExperience={handleStartExperience}
-          onExportText={handleExportTextFile}
-          onExportGoogleDoc={handleExportGoogleDoc}
-          onExportGoogleDocViaMcp={handleExportGoogleDocViaMcp}
-          orbExperience={orbExperience}
-          isPartyMode={isPartyMode}
-          onTogglePartyMode={handleTogglePartyMode}
-        />
+        {!firebaseReady ? (
+          <div className="min-h-screen flex flex-col bg-black text-white">
+            <header className="flex justify-end p-4">
+              <UserButton />
+            </header>
+            <main className="flex-1 flex items-center justify-center">
+              <div className="text-sm text-slate-400">
+                Connecting to Firestore…
+              </div>
+            </main>
+          </div>
+        ) : (
+          <>
+            <header className="flex justify-end p-4">
+              <UserButton />
+            </header>
+            <HomeMainLayout
+              showOrb={showOrb}
+              provider={provider}
+              isMuted={isMuted}
+              onProviderChange={handleSetProvider}
+              onToggleMute={handleToggleMute}
+              onStartExperience={handleStartExperience}
+              onExportText={handleExportTextFile}
+              onExportGoogleDoc={handleExportGoogleDoc}
+              onExportGoogleDocViaMcp={handleExportGoogleDocViaMcp}
+              orbExperience={orbExperience}
+              isPartyMode={isPartyMode}
+              onTogglePartyMode={handleTogglePartyMode}
+            />
+          </>
+        )}
       </SignedIn>
     </>
   );

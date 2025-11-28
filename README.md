@@ -104,3 +104,14 @@ Poppy is an AI sidekick that lets creators talk through their content strategy, 
 - **Typing + TTS Sync** – Keeping ElevenLabs playback and on-screen typing perfectly in sync so Poppy “talks while she types.” [Full writeup](docs/typing-tts-sync.md)
 - **Double Messages Bug** – Removing side-effects from React state updaters to stop duplicate API calls/responses. [Full writeup](docs/double-messages-bug.md)
 
+## Firebase client env vars
+
+These are used by `lib/firebaseClient.ts` to initialize the Firebase Web SDK:
+
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+- `NEXT_PUBLIC_FIREBASE_APP_ID`
+
