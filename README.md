@@ -100,9 +100,12 @@ Poppy is an AI sidekick that lets creators talk through their content strategy, 
 - **Google Docs export** – “boss fight” requirement handled via MCP tool-calling from within chat.
 
 ## Challenges & Deep Dives
+- **Backend Auth & Data Architecture** – How Clerk, Firebase (Firestore + Auth), and Supabase work together: custom Firebase tokens from Clerk, Firestore Security Rules, realtime board reads, and cascading deletes on user removal. [Full writeup](docs/backend-auth.md)
+- **Localtunnel + Clerk Webhooks** – Using localtunnel to expose the local Next.js dev server so Clerk can reach `/api/clerk-webhook`, wiring up the `user.deleted` event, and handling rotating tunnel URLs during development. [Full writeup](docs/localtunnel-webhook.md)
 - **MCP Google Docs Export** – Full pipeline from OAuth → MCP server → AI SDK tool → chat narration. [Full writeup](docs/mcp-google-docs.md)
 - **Typing + TTS Sync** – Keeping ElevenLabs playback and on-screen typing perfectly in sync so Poppy “talks while she types.” [Full writeup](docs/typing-tts-sync.md)
 - **Double Messages Bug** – Removing side-effects from React state updaters to stop duplicate API calls/responses. [Full writeup](docs/double-messages-bug.md)
+
 
 ## Firebase client env vars
 
