@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import BoardsPanel from "./component/Sidebars/BoardsPanel";
 import BoardFormPanel from "./component/Sidebars/BoardFormPanel";
 import useOrbVisualizer from "./hook/useOrbVisualizer";
@@ -1234,17 +1235,45 @@ export default function Home() {
   return (
     <>
       <SignedOut>
-        <div className="min-h-screen flex items-center justify-center bg-black text-white">
-          <div className="space-y-4 text-center">
-            <h1 className="text-xl font-semibold">Welcome to Poppy</h1>
-            <p className="text-sm text-gray-300">
-              Sign in to start chatting and save your boards & conversations.
+        <div className="min-h-screen flex items-center justify-center bg-black text-white px-4">
+          <div className="max-w-lg w-full px-6 py-10 rounded-3xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent flex flex-col items-center text-center gap-6">
+            <Image
+              src="/icons/poppy.png"
+              alt="Poppy"
+              width={180}
+              height={180}
+              className="w-32 h-32 object-contain"
+            />
+
+            <h1 className="text-2xl md:text-3xl font-bold">
+              Turn your content into a{" "}
+              <span className="text-[#7E84F2] drop-shadow-[0_0_10px_rgba(126,132,242,0.9)]">
+                content engine
+              </span>
+              .
+            </h1>
+
+            <p className="text-sm md:text-base text-[#F2E8DC]/80">
+              Poppy is a voice-first AI content buddy that helps you turn your
+              existing videos, docs, and ideas into hooks, scripts, posts, and
+              more — all in your own voice.
             </p>
+
+            <ul className="text-xs md:text-sm text-[#F2E8DC]/70 space-y-1 text-left w-full max-w-sm mx-auto">
+              <li>• Save boards of links, scripts, and reference material</li>
+              <li>• Chat and brainstorm with Poppy about your content</li>
+              <li>• Keep a history of your sessions and ideas</li>
+            </ul>
+
             <SignInButton mode="modal">
-              <button className="rounded-full px-6 py-2 text-sm font-semibold bg-white text-black hover:bg-gray-200 transition">
-                Sign in with Clerk
+              <button className="mt-2 px-8 py-3 rounded-full bg-[#F27979] hover:bg-[#F2A0A0] text-[#0D0D0D] font-semibold text-lg shadow-[0_0_25px_rgba(242,121,121,0.7)] transition-transform hover:scale-105">
+                Sign In to Start
               </button>
             </SignInButton>
+
+            <p className="text-[11px] text-[#F2E8DC]/60 mt-1">
+              New here? You&apos;ll get started after signing in.
+            </p>
           </div>
         </div>
       </SignedOut>
